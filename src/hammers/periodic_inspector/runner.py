@@ -3,6 +3,7 @@
 import argparse
 import concurrent.futures
 import logging
+import time
 from concurrent.futures import Future, ThreadPoolExecutor
 
 import openstack
@@ -59,12 +60,17 @@ def inspect_a_node(
                     node.uuid,
                     node.name,
                 )
-                return node
+                time.sleep(10)
+                node = connection.baremetal.get_node(node.uuid)
             else:
                 LOG.info("starting inspection for node %s:%s", node.uuid, node.name)
-                return connection.inspect_machine(node.uuid, wait=True, timeout=900)
+                node = connection.inspect_machine(node.uuid, wait=True, timeout=900)
         else:
             LOG.debug("skipping: inspection for node %s:%s", node.uuid, node.name)
+            return None
+
+        return node
+
     return None
 
 
@@ -122,23 +128,23 @@ def main() -> None:
             )
             future_to_inspected_node[inspection_future] = node
 
-    for future in concurrent.futures.as_completed(future_to_inspected_node):
-        node = future_to_inspected_node[future]
-        if future.exception() is not None:
-            LOG.warning(
-                "node %s:%s failed to inspect with error %s",
-                node.uuid,
-                node.name,
-                future.exception(),
-            )
-        else:
-            inspected_node = future.result()
-            if inspected_node:
-                LOG.info(
-                    "finished inspection for node %s:%s",
-                    inspected_node.uuid,
-                    inspected_node.name,
+        for future in concurrent.futures.as_completed(future_to_inspected_node):
+            node = future_to_inspected_node[future]
+            if future.exception() is not None:
+                LOG.warning(
+                    "node %s:%s failed to inspect with error %s",
+                    node.id,
+                    node.name,
+                    future.exception(),
                 )
+            else:
+                inspected_node = future.result()
+                if inspected_node:
+                    LOG.info(
+                        "finished inspection for node %s:%s",
+                        inspected_node.id,
+                        inspected_node.name,
+                    )
 
 
 if __name__ == "__main__":
