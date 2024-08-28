@@ -66,6 +66,9 @@ class ReservableNode(IronicNode):
     def needs_bootmode_set(self) -> bool:
         """Return true if `boot_mode` not in capabilities."""
         capabilities = self.properties.get("capabilities")
+        if not capabilities:
+            return True
+
         return "boot_mode" not in capabilities
 
 
