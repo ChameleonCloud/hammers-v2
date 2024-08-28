@@ -21,21 +21,30 @@ def inspect_a_node(
     dry_run: bool = True,  # noqa: FBT001
 ) -> Future:
     """Queue a node for inspection, and handle interruptions."""
-    # if extra.inspect.target_provision_state is not set
-    # set extra.inspect.target_provision_state == provision_state
-    # do inspection stuff
-    # when finished, move node to extra.inspect.target_provision_state
-    #   if success, unset extra.inspect.target_provision_state
-    # goal is to handle moving nodes back to active if inspection interrupted in the middle.
-
+    ### Readonly checks
     if node.needs_bootmode_set():
         LOG.warning("boot_mode capability is unset: node %s:%s", node.uuid, node.name)
 
-    if dry_run:
-        LOG.info("DRY-RUN: starting inspection for node %s:%s", node.uuid, node.name)
-        return node
-    LOG.info("starting inspection for node %s:%s", node.uuid, node.name)
-    return connection.inspect_machine(node.uuid, wait=True, timeout=900)
+    ### Check if safe to modify
+    if node.needs_inspection():
+        if (
+            not node.blazar_reserved
+            and not node.is_maintenance
+            and node.provision_state in utils.INSPECTABLE_PROVISION_STATES
+        ):
+            if dry_run:
+                LOG.info(
+                    "DRY-RUN: starting inspection for node %s:%s",
+                    node.uuid,
+                    node.name,
+                )
+                return node
+            else:
+                LOG.info("starting inspection for node %s:%s", node.uuid, node.name)
+                return connection.inspect_machine(node.uuid, wait=True, timeout=900)
+        else:
+            LOG.info("skipping: inspection for node %s:%s", node.uuid, node.name)
+    return None
 
 
 def parse_args() -> argparse.Namespace:
@@ -54,7 +63,8 @@ def parse_args() -> argparse.Namespace:
         "-p",
         "--parallel",
         help="How many nodes can be inspecting at once.",
-        default=5,
+        type=int,
+        default=1,
     )
     return parser.parse_args()
 
@@ -66,14 +76,11 @@ def main() -> None:
 
     LOG.info("Collecting node and reservation info for cloud %s", args.cloud)
     ironic_nodes_cache = utils.ironic_nodes_with_reservation_status(connection=conn)
-    nodes_to_inspect = [
-        n for n in ironic_nodes_cache if n.needs_inspection() and not n.blazar_reserved
-    ]
     LOG.info("Finished collecting node and reservation info for cloud %s", args.cloud)
 
     future_to_inspected_node = {}
     with ThreadPoolExecutor(max_workers=args.parallel) as executor:
-        for node in nodes_to_inspect:
+        for node in ironic_nodes_cache:
             inspection_future = executor.submit(
                 inspect_a_node,
                 connection=conn,
@@ -93,11 +100,12 @@ def main() -> None:
             )
         else:
             inspected_node = future.result()
-            LOG.info(
-                "finished inspection for node %s:%s",
-                inspected_node.uuid,
-                inspected_node.name,
-            )
+            if inspected_node:
+                LOG.info(
+                    "finished inspection for node %s:%s",
+                    inspected_node.uuid,
+                    inspected_node.name,
+                )
 
 
 if __name__ == "__main__":
