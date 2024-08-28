@@ -24,6 +24,7 @@ def inspect_a_node(
     node: utils.ReservableNode,
     dry_run: bool = True,  # noqa: FBT001
     provide_manageable: bool = False,
+    inspect_reserved: bool = False,
 ) -> Future:
     """Queue a node for inspection, and handle interruptions."""
     ### Readonly checks
@@ -48,7 +49,7 @@ def inspect_a_node(
     ### Check if safe to modify
     if node.needs_inspection():
         if (
-            not node.blazar_reserved
+            (inspect_reserved or not node.blazar_reserved)
             and not node.is_maintenance
             and node.provision_state in utils.INSPECTABLE_PROVISION_STATES
         ):
@@ -85,6 +86,11 @@ def parse_args() -> argparse.Namespace:
         help="set nodes found in manageable state to available",
     )
     parser.add_argument(
+        "--inspect-reserved",
+        action="store_true",
+        help="also inspected nodes which are reserved but not active",
+    )
+    parser.add_argument(
         "-p",
         "--parallel",
         help="How many nodes can be inspecting at once.",
@@ -112,6 +118,7 @@ def main() -> None:
                 node=node,
                 dry_run=args.dry_run,
                 provide_manageable=args.provide_manageable,
+                inspect_reserved=args.inspect_reserved,
             )
             future_to_inspected_node[inspection_future] = node
 
