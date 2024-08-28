@@ -31,5 +31,8 @@ Homepage = 'https://github.com/ChameleonCloud/hammers'
 [project.optional-dependencies]
 test = ["ruff"]
 
+[project.scripts]
+periodic_inspector = "hammers.periodic_inspector.runner:main"
+
 [tool.ruff.lint]
 select = ["ALL"]
