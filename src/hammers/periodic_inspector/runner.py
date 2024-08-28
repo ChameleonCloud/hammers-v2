@@ -10,7 +10,11 @@ from openstack.connection import Connection
 
 from hammers.common import utils
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 openstack.enable_logging(debug=False)
 LOG = logging.getLogger(__name__)
 
@@ -19,11 +23,27 @@ def inspect_a_node(
     connection: Connection,
     node: utils.ReservableNode,
     dry_run: bool = True,  # noqa: FBT001
+    provide_manageable: bool = False,
 ) -> Future:
     """Queue a node for inspection, and handle interruptions."""
     ### Readonly checks
     if node.needs_bootmode_set():
         LOG.warning("boot_mode capability is unset: node %s:%s", node.uuid, node.name)
+
+    if (
+        not node.is_maintenance
+        and node.provision_state == "manageable"
+        and not node.needs_inspection()
+    ):
+        if dry_run:
+            LOG.warning("Please run provide for node: node %s:%s", node.uuid, node.name)
+        elif provide_manageable:
+            LOG.warning(
+                "setting node %s:%s to available, inspection may have been interrupted.",
+                node.uuid,
+                node.name,
+            )
+            connection.baremetal.set_node_provision_state(node.uuid, "provide")
 
     ### Check if safe to modify
     if node.needs_inspection():
@@ -43,7 +63,7 @@ def inspect_a_node(
                 LOG.info("starting inspection for node %s:%s", node.uuid, node.name)
                 return connection.inspect_machine(node.uuid, wait=True, timeout=900)
         else:
-            LOG.info("skipping: inspection for node %s:%s", node.uuid, node.name)
+            LOG.debug("skipping: inspection for node %s:%s", node.uuid, node.name)
     return None
 
 
@@ -58,6 +78,11 @@ def parse_args() -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="print out which nodes will be inspected, but take no action.",
+    )
+    parser.add_argument(
+        "--provide-manageable",
+        action="store_true",
+        help="set nodes found in manageable state to available",
     )
     parser.add_argument(
         "-p",
@@ -86,6 +111,7 @@ def main() -> None:
                 connection=conn,
                 node=node,
                 dry_run=args.dry_run,
+                provide_manageable=args.provide_manageable,
             )
             future_to_inspected_node[inspection_future] = node
 
