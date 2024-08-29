@@ -4,6 +4,7 @@ import argparse
 import concurrent.futures
 import logging
 from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import timedelta
 
 import openstack
 from openstack.connection import Connection
@@ -22,12 +23,16 @@ LOG = logging.getLogger(__name__)
 def inspect_a_node(
     connection: Connection,
     node: utils.ReservableNode,
+    expire_days: int = 31,
     dry_run: bool = True,  # noqa: FBT001
     provide_manageable: bool = False,
     inspect_reserved: bool = False,
     reinspect_failed: bool = False,
 ) -> Future:
     """Queue a node for inspection, and handle interruptions."""
+
+    inspection_timedelta = timedelta(days=expire_days)
+
     ### Readonly checks
     if node.needs_bootmode_set():
         LOG.warning("boot_mode capability is unset: node %s:%s", node.uuid, node.name)
@@ -35,24 +40,24 @@ def inspect_a_node(
     if (
         not node.is_maintenance
         and node.provision_state == "manageable"
-        and not node.needs_inspection()
+        and not node.needs_inspection(inspection_timedelta)
     ):
-        if dry_run:
-            LOG.warning("Please run provide for node: node %s:%s", node.uuid, node.name)
-        elif provide_manageable:
+        if provide_manageable and not dry_run:
             LOG.warning(
                 "setting node %s:%s to available, inspection may have been interrupted.",
                 node.uuid,
                 node.name,
             )
             connection.baremetal.set_node_provision_state(node.uuid, "provide")
+        else:
+            LOG.warning("Please run provide for node: node %s:%s", node.uuid, node.name)
 
     inspectable_provision_states = utils.INSPECTABLE_PROVISION_STATES
     if reinspect_failed:
         inspectable_provision_states.append("inspect failed")
 
     ### Check if safe to modify
-    if node.needs_inspection():
+    if node.needs_inspection(inspection_timedelta):
         if (
             (inspect_reserved or not node.blazar_reserved)
             and not node.is_maintenance
@@ -105,6 +110,12 @@ def parse_args() -> argparse.Namespace:
         help="re-inspect nodes in state 'inspect failed'",
     )
     parser.add_argument(
+        "--expire-days",
+        help="If previous inspection is older than this many days, re-inspect.'",
+        type=int,
+        default=31,
+    )
+    parser.add_argument(
         "-p",
         "--parallel",
         help="How many nodes can be inspecting at once.",
@@ -130,6 +141,7 @@ def main() -> None:
                 inspect_a_node,
                 connection=conn,
                 node=node,
+                expire_days=args.expire_days,
                 dry_run=args.dry_run,
                 provide_manageable=args.provide_manageable,
                 inspect_reserved=args.inspect_reserved,
