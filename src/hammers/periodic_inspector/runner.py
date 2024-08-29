@@ -3,7 +3,6 @@
 import argparse
 import concurrent.futures
 import logging
-import time
 from concurrent.futures import Future, ThreadPoolExecutor
 
 import openstack
@@ -26,6 +25,7 @@ def inspect_a_node(
     dry_run: bool = True,  # noqa: FBT001
     provide_manageable: bool = False,
     inspect_reserved: bool = False,
+    reinspect_failed: bool = False,
 ) -> Future:
     """Queue a node for inspection, and handle interruptions."""
     ### Readonly checks
@@ -47,12 +47,16 @@ def inspect_a_node(
             )
             connection.baremetal.set_node_provision_state(node.uuid, "provide")
 
+    inspectable_provision_states = utils.INSPECTABLE_PROVISION_STATES
+    if reinspect_failed:
+        inspectable_provision_states.append("inspect failed")
+
     ### Check if safe to modify
     if node.needs_inspection():
         if (
             (inspect_reserved or not node.blazar_reserved)
             and not node.is_maintenance
-            and node.provision_state in utils.INSPECTABLE_PROVISION_STATES
+            and node.provision_state in inspectable_provision_states
         ):
             if dry_run:
                 LOG.info(
@@ -60,7 +64,6 @@ def inspect_a_node(
                     node.uuid,
                     node.name,
                 )
-                time.sleep(10)
                 node = connection.baremetal.get_node(node.uuid)
             else:
                 LOG.info("starting inspection for node %s:%s", node.uuid, node.name)
@@ -97,6 +100,11 @@ def parse_args() -> argparse.Namespace:
         help="also inspected nodes which are reserved but not active",
     )
     parser.add_argument(
+        "--reinspect-failed",
+        action="store_true",
+        help="re-inspect nodes in state 'inspect failed'",
+    )
+    parser.add_argument(
         "-p",
         "--parallel",
         help="How many nodes can be inspecting at once.",
@@ -125,6 +133,7 @@ def main() -> None:
                 dry_run=args.dry_run,
                 provide_manageable=args.provide_manageable,
                 inspect_reserved=args.inspect_reserved,
+                reinspect_failed=args.reinspect_failed,
             )
             future_to_inspected_node[inspection_future] = node
 

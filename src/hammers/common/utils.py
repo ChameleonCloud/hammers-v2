@@ -32,7 +32,6 @@ RESERVABLE_PROVISION_STATES = [
 INSPECTABLE_PROVISION_STATES = [
     "available",
     "manageable",
-    "inspect failed",
 ]
 
 
