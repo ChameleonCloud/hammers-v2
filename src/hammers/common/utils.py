@@ -6,6 +6,7 @@ from collections import OrderedDict
 from collections.abc import Generator
 from urllib.parse import urlencode
 
+import iso8601
 from openstack import resource
 from openstack.baremetal.v1.node import Node as IronicNode
 from openstack.connection import Connection
@@ -16,6 +17,10 @@ def pp(item: dict) -> None:
     """Pretty print a dict."""
     print(json.dumps(item))
 
+
+# Don't touch a node if the next reservation starts in under 4 hours, gives time to recover
+# from failures.
+MINIMUM_BUFFER_SECONDS = datetime.timedelta(seconds=3600 * 4)
 
 # List of ironic provision states that a healthy blazar host may be in
 RESERVABLE_PROVISION_STATES = [
@@ -94,8 +99,33 @@ def unreserved_blazar_hosts(connection: Connection) -> Generator[BlazarHost]:
     """Return generator of blazar hosts which have an empty reservations list."""
     res_proxy = connection.reservation
 
-    unreserved_allocations = res_proxy.host_allocations(reservations=[])
-    for alloc in unreserved_allocations:
+    allocations = res_proxy.host_allocations()
+    now = datetime.datetime.now(tz=datetime.UTC)
+    for alloc in allocations:
+        in_reservation = False
+        reservations = alloc.reservations
+        if reservations:
+            min_start_date = None
+            for res in reservations:
+                start_date = iso8601.parse_date(res.start_date)
+                end_date = iso8601.parse_date(res.end_date)
+                if now >= start_date and now <= end_date:
+                    in_reservation = True
+                    break
+                # get start of earliest reservation
+                if not min_start_date:
+                    min_start_date = start_date
+                else:
+                    min_start_date = min(min_start_date, start_date)
+            if in_reservation:
+                continue
+            else:
+                time_to_res = min_start_date - now
+                if time_to_res <= MINIMUM_BUFFER_SECONDS:
+                    print(
+                        f"Skipping {alloc.resource_id}: next reservation starts in {time_to_res}"
+                    )
+
         yield res_proxy.get_host(alloc.resource_id)
 
 
