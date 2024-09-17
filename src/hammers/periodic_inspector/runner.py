@@ -3,8 +3,10 @@
 import argparse
 import concurrent.futures
 import logging
+import random
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import timedelta
+from typing import Generator
 
 import openstack
 from openstack.connection import Connection
@@ -20,66 +22,74 @@ openstack.enable_logging(debug=False)
 LOG = logging.getLogger(__name__)
 
 
-def inspect_a_node(
+def get_nodes_to_inspect(
     connection: Connection,
-    node: utils.ReservableNode,
+    nodes: list[utils.ReservableNode],
     expire_days: int = 31,
     dry_run: bool = True,  # noqa: FBT001
     provide_manageable: bool = False,
     inspect_reserved: bool = False,
     reinspect_failed: bool = False,
-) -> Future:
+) -> Generator[utils.ReservableNode, None, None]:
     """Queue a node for inspection, and handle interruptions."""
-
     inspection_timedelta = timedelta(days=expire_days)
 
-    ### Readonly checks
-    if node.needs_bootmode_set():
-        LOG.warning("boot_mode capability is unset: node %s:%s", node.uuid, node.name)
-
-    if (
-        not node.is_maintenance
-        and node.provision_state == "manageable"
-        and not node.needs_inspection(inspection_timedelta)
-    ):
-        if provide_manageable and not dry_run:
+    for node in nodes:
+        ### Readonly checks
+        if node.needs_bootmode_set():
             LOG.warning(
-                "setting node %s:%s to available, inspection may have been interrupted.",
-                node.uuid,
-                node.name,
+                "boot_mode capability is unset: node %s:%s", node.uuid, node.name
             )
-            connection.baremetal.set_node_provision_state(node.uuid, "provide")
-        else:
-            LOG.warning("Please run provide for node: node %s:%s", node.uuid, node.name)
 
-    inspectable_provision_states = utils.INSPECTABLE_PROVISION_STATES
-    if reinspect_failed:
-        inspectable_provision_states.append("inspect failed")
-
-    ### Check if safe to modify
-    if node.needs_inspection(inspection_timedelta):
         if (
-            (inspect_reserved or not node.blazar_reserved)
-            and not node.is_maintenance
-            and node.provision_state in inspectable_provision_states
+            not node.is_maintenance
+            and node.provision_state == "manageable"
+            and not node.needs_inspection(inspection_timedelta)
         ):
-            if dry_run:
-                LOG.info(
-                    "DRY-RUN: starting inspection for node %s:%s",
+            if provide_manageable and not dry_run:
+                LOG.warning(
+                    "setting node %s:%s to available, inspection may have been interrupted.",
                     node.uuid,
                     node.name,
                 )
-                node = connection.baremetal.get_node(node.uuid)
+                connection.baremetal.set_node_provision_state(node.uuid, "provide")
             else:
-                LOG.info("starting inspection for node %s:%s", node.uuid, node.name)
-                node = connection.inspect_machine(node.uuid, wait=True, timeout=900)
-        else:
-            LOG.debug("skipping: inspection for node %s:%s", node.uuid, node.name)
-            return None
+                LOG.warning(
+                    "Please run provide for node: node %s:%s", node.uuid, node.name
+                )
 
-        return node
+        inspectable_provision_states = utils.INSPECTABLE_PROVISION_STATES
+        if reinspect_failed:
+            inspectable_provision_states.append("inspect failed")
 
-    return None
+        ### Check if safe to modify
+        if (
+            node.needs_inspection(inspection_timedelta)
+            and (inspect_reserved or not node.blazar_reserved)
+            and not node.is_maintenance
+            and node.provision_state in inspectable_provision_states
+        ):
+            yield node
+
+        LOG.debug("skipping: inspection for node %s:%s", node.uuid, node.name)
+
+
+def start_inspection(
+    connection: Connection,
+    node: utils.ReservableNode,
+    dry_run: bool,
+) -> Future:
+    if dry_run:
+        LOG.info(
+            "DRY-RUN: starting inspection for node %s:%s",
+            node.uuid,
+            node.name,
+        )
+        node = connection.baremetal.get_node(node.uuid)
+    else:
+        LOG.info("starting inspection for node %s:%s", node.uuid, node.name)
+        node = connection.inspect_machine(node.uuid, wait=True, timeout=900)
+    return node
 
 
 def parse_args() -> argparse.Namespace:
@@ -118,7 +128,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "-p",
         "--parallel",
-        help="How many nodes can be inspecting at once.",
+        help="Maximum number of nodes to inspect in parallel.",
+        type=int,
+        default=1,
+    )
+    parser.add_argument(
+        "--limit",
+        help="Maximum number of nodes to inspect. No queue if <= `parallel`",
         type=int,
         default=1,
     )
@@ -131,21 +147,36 @@ def main() -> None:
     conn = openstack.connect(cloud=args.cloud)
 
     LOG.info("Collecting node and reservation info for cloud %s", args.cloud)
-    ironic_nodes_cache = utils.ironic_nodes_with_reservation_status(connection=conn)
-    LOG.info("Finished collecting node and reservation info for cloud %s", args.cloud)
+
+    nodes_to_inspect = list(
+        get_nodes_to_inspect(
+            connection=conn,
+            nodes=utils.ironic_nodes_with_reservation_status(connection=conn),
+            expire_days=args.expire_days,
+            dry_run=args.dry_run,
+            provide_manageable=args.provide_manageable,
+            inspect_reserved=args.inspect_reserved,
+            reinspect_failed=args.reinspect_failed,
+        ),
+    )
+    random.shuffle(nodes_to_inspect)
+
+    num_nodes_to_inspect = min(args.limit, len(nodes_to_inspect))
+    LOG.info(
+        "Found %s nodes to inspect for cloud %s, processing %s",
+        len(nodes_to_inspect),
+        args.cloud,
+        num_nodes_to_inspect,
+    )
 
     future_to_inspected_node = {}
     with ThreadPoolExecutor(max_workers=args.parallel) as executor:
-        for node in ironic_nodes_cache:
+        for node in nodes_to_inspect[:num_nodes_to_inspect]:
             inspection_future = executor.submit(
-                inspect_a_node,
+                start_inspection,
                 connection=conn,
                 node=node,
-                expire_days=args.expire_days,
                 dry_run=args.dry_run,
-                provide_manageable=args.provide_manageable,
-                inspect_reserved=args.inspect_reserved,
-                reinspect_failed=args.reinspect_failed,
             )
             future_to_inspected_node[inspection_future] = node
 
