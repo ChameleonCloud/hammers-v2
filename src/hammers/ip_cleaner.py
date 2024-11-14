@@ -1,10 +1,17 @@
+"""Module to clean up unused ip addresses."""
+
 import argparse
-import datetime
 import logging
-from datetime import timedelta
+import sys
+from collections.abc import Generator
+from datetime import datetime as DateTime
+from datetime import timedelta as TimeDelta
+from datetime import timezone as TimeZone
 
 import iso8601
 import openstack
+from openstack.connection import Connection
+from openstack.network.v2.floating_ip import FloatingIP
 
 logging.basicConfig(
     level=logging.INFO,
@@ -15,7 +22,34 @@ openstack.enable_logging(debug=False)
 LOG = logging.getLogger(__name__)
 
 
-def parse_args() -> argparse.Namespace:
+def grace_period_expired(updated_str: str, grace_period: TimeDelta) -> bool:
+    """Return true if resource hasn't been updated in longer than grace period."""
+    last_updated = iso8601.parse_date(updated_str)
+    now = DateTime.now(tz=TimeZone.utc)
+
+    # explicitly time of last update is older than expiry time
+    return last_updated < (now - grace_period)
+
+
+def find_idle_floating_ips(conn: Connection, grace_period) -> Generator[FloatingIP]:
+    floating_ips = conn.list_floating_ips()
+
+    for fip in floating_ips:
+        if "blazar" in fip.tags:
+            LOG.debug("skipping FIP %s, managed by blazar", fip.floating_ip_address)
+            continue
+        if fip.status == "ACTIVE":
+            LOG.debug("skipping FIP %s, is active", fip.floating_ip_address)
+            continue
+        if not grace_period_expired(fip.updated_at, grace_period):
+            LOG.debug("skipping FIP %s, still in grace period", fip.floating_ip_address)
+            continue
+
+        yield fip
+
+
+def parse_args(args: list[str]) -> argparse.Namespace:
+    """Handle CLI arguments."""
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
@@ -27,37 +61,39 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="print out which IPs would be removed, instead of deleting them.",
     )
-    return parser.parse_args()
+    parser.add_argument("--debug", action="store_true", help="increase log verbosity.")
+    parser.add_argument(
+        "--grace-days",
+        type=int,
+        default=7,
+        help="How many days does a resource need to be unused before we'll clean it up",
+    )
+    return parser.parse_args(args)
 
 
-def _compare_fip(item: openstack.network.v2.floating_ip.FloatingIP):
-    return item.updated_at
+def main(arg_list: list[str]) -> None:
+    args = parse_args(arg_list)
 
+    if args.debug:
+        LOG.setLevel(logging.DEBUG)
 
-def main() -> None:
-    args = parse_args()
+    grace_period = TimeDelta(days=args.grace_days)
+
     conn = openstack.connect(cloud=args.cloud)
 
-    query = {
-        "status": "DOWN",
-        "not-tags": "blazar",
-    }
-    fips_list = list(conn.network.ips(**query))
-    fips_list.sort(key=_compare_fip)
-    ip: openstack.network.v2.floating_ip.FloatingIP
-    for ip in fips_list:
-        last_updated = iso8601.parse_date(ip.updated_at)
-        if (datetime.datetime.now(tz=datetime.UTC) - last_updated) >= timedelta(days=7):
-            if args.dry_run:
-                LOG.info(
-                    "DRY-RUN: FIP %s was last updated at %s, would be deleted",
-                    ip.floating_ip_address,
-                    ip.updated_at,
-                )
-            else:
-                conn.network.delete_ip(ip)
-                LOG.info("Deleted floating IP %s due to age", ip.floating_ip_address)
+    fips = find_idle_floating_ips(conn=conn, grace_period=grace_period)
+    for f in fips:
+        if args.dry_run:
+            LOG.info("DRY-RUN: remove floating IP %s:%s", f.id, f.floating_ip_address)
+
+        if not args.dry_run:
+            LOG.info("deleting unused floating IP %s:%s", f.id, f.floating_ip_address)
+            conn.delete_floating_ip(f.id)
+
+
+def launch_main():
+    main(sys.argv[1:])
 
 
 if __name__ == "__main__":
-    main()
+    launch_main()

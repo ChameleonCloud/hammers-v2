@@ -32,7 +32,9 @@ Homepage = 'https://github.com/ChameleonCloud/hammers'
 dev = [
   "ruff",
   "pytest",
+  "freezegun"
   ]
 
 [project.scripts]
 periodic_inspector = "hammers.periodic_node_inspector:main"
+floating_ip_reaper = "hammers.ip_cleaner:launch_main"
