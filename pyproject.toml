@@ -29,10 +29,10 @@ dependencies = [
 Homepage = 'https://github.com/ChameleonCloud/hammers'
 
 [project.optional-dependencies]
-test = ["ruff"]
+dev = [
+  "ruff",
+  "pytest",
+  ]
 
 [project.scripts]
-periodic_inspector = "hammers.periodic_inspector.runner:main"
-
-[tool.ruff.lint]
-select = ["ALL"]
+periodic_inspector = "hammers.periodic_node_inspector:main"

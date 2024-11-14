@@ -4,14 +4,14 @@ import argparse
 import concurrent.futures
 import logging
 import random
+from collections.abc import Generator
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import timedelta
-from typing import Generator
 
 import openstack
 from openstack.connection import Connection
 
-from hammers.common import utils
+from hammers import utils
 
 logging.basicConfig(
     level=logging.INFO,
