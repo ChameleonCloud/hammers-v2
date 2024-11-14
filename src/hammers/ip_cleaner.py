@@ -12,6 +12,7 @@ import iso8601
 import openstack
 from openstack.connection import Connection
 from openstack.network.v2.floating_ip import FloatingIP
+from openstack.network.v2.router import Router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,6 +49,44 @@ def find_idle_floating_ips(conn: Connection, grace_period) -> Generator[Floating
         yield fip
 
 
+def find_idle_routers(
+    conn: Connection,
+    grace_period,
+    ip_whitelist: set = None,
+) -> Generator[Router]:
+    routers = conn.list_routers()
+
+    for router in routers:
+        interfaces = conn.list_router_interfaces(
+            router=router,
+            interface_type="internal",
+        )
+        if len(interfaces) > 0:
+            LOG.debug("skipping router %s, has active ports", router.id)
+            continue
+
+        if not grace_period_expired(router.updated_at, grace_period):
+            LOG.debug("skipping router %s, still in grace period", router.id)
+            continue
+
+        uses_whitelisted_ip = False
+        if router.external_gateway_info:
+            external_ips = [
+                e.get("ip_address")
+                for e in router.external_gateway_info.get("external_fixed_ips", [])
+            ]
+            for ip in external_ips:
+                if ip in ip_whitelist:
+                    uses_whitelisted_ip = True
+                    break
+
+        if uses_whitelisted_ip:
+            LOG.debug("skipping router %s, uses whitelisted ip %s", router.id, ip)
+            continue
+
+        yield router
+
+
 def parse_args(args: list[str]) -> argparse.Namespace:
     """Handle CLI arguments."""
     parser = argparse.ArgumentParser()
@@ -80,6 +119,7 @@ def main(arg_list: list[str]) -> None:
     grace_period = TimeDelta(days=args.grace_days)
 
     conn = openstack.connect(cloud=args.cloud)
+    reservable_ips = {r.floating_ip_address for r in conn.reservation.floatingips()}
 
     fips = find_idle_floating_ips(conn=conn, grace_period=grace_period)
     for f in fips:
@@ -89,6 +129,17 @@ def main(arg_list: list[str]) -> None:
         if not args.dry_run:
             LOG.info("deleting unused floating IP %s:%s", f.id, f.floating_ip_address)
             conn.delete_floating_ip(f.id)
+
+    routers = find_idle_routers(
+        conn=conn, grace_period=grace_period, ip_whitelist=reservable_ips
+    )
+    for r in routers:
+        if args.dry_run:
+            LOG.info("DRY-RUN: remove router %s:%s", r.id, r.name)
+
+        if not args.dry_run:
+            LOG.info("deleting unused router %s:%s", r.id, r.name)
+            conn.delete_router(r.id)
 
 
 def launch_main():
