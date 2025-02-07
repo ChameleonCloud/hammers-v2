@@ -4,15 +4,14 @@ import argparse
 import logging
 import sys
 from collections.abc import Generator
-from datetime import datetime as DateTime
 from datetime import timedelta as TimeDelta
-from datetime import timezone as TimeZone
 
-import iso8601
 import openstack
 from openstack.connection import Connection
 from openstack.network.v2.floating_ip import FloatingIP
 from openstack.network.v2.router import Router
+
+from hammers.utils import grace_period_expired
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,15 +20,6 @@ logging.basicConfig(
 )
 openstack.enable_logging(debug=False)
 LOG = logging.getLogger(__name__)
-
-
-def grace_period_expired(updated_str: str, grace_period: TimeDelta) -> bool:
-    """Return true if resource hasn't been updated in longer than grace period."""
-    last_updated = iso8601.parse_date(updated_str)
-    now = DateTime.now(tz=TimeZone.utc)
-
-    # explicitly time of last update is older than expiry time
-    return last_updated < (now - grace_period)
 
 
 def find_idle_floating_ips(conn: Connection, grace_period) -> Generator[FloatingIP]:

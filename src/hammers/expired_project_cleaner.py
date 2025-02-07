@@ -4,17 +4,11 @@ import argparse
 from collections import defaultdict
 import logging
 import sys
-from collections.abc import Generator
-from datetime import datetime as DateTime
-from datetime import timedelta as TimeDelta
-from datetime import timezone as TimeZone
-
-import iso8601
 import openstack
-from openstack.connection import Connection
-from openstack.network.v2.floating_ip import FloatingIP
-from openstack.network.v2.router import Router
-import requests
+from datetime import timedelta as TimeDelta
+
+from hammers.utils import project_is_expired
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,15 +17,6 @@ logging.basicConfig(
 )
 openstack.enable_logging(debug=False)
 LOG = logging.getLogger(__name__)
-
-
-def grace_period_expired(last_alloc_str: str, grace_period: TimeDelta) -> bool:
-    """Return true if resource hasn't been updated in longer than grace period."""
-    last_updated = iso8601.parse_date(last_alloc_str)
-    now = DateTime.now(tz=TimeZone.utc)
-
-    # explicitly time of last update is older than expiry time
-    return last_updated < (now - grace_period)
 
 
 def parse_args(args: list[str]) -> argparse.Namespace:
@@ -92,23 +77,11 @@ def main(arg_list: list[str]) -> None:
 
     for project_id, servers in servers_by_project.items():
         # Some old KVM projects have `charge_code` set, but new ones use `name`
-        try:
-            charge_code = projects_by_id[project_id].charge_code
-        except Exception:
+        charge_code = projects_by_id[project_id].get("charge_code")
+        if not charge_code:
             charge_code = projects_by_id[project_id].name
-        api_url = f"http://chameleoncloud.org/admin/allocations/api/view/{charge_code}/?token={api_token}"
-        res = requests.get(api_url)
-        try:
-            res.raise_for_status()
-            alloc_json = res.json()
-        except (requests.HTTPError, requests.exceptions.JSONDecodeError):
-            LOG.error("Allocation lookup for %s returned status %s. Project has %d servers", charge_code, res.status_code, len(servers))
-            continue
-        if not alloc_json["is_active"] and grace_period_expired(alloc_json["expiration_date"], grace_period):
-            if ignore_pending and alloc_json["has_pending_allocation"]:
-                LOG.info("Ignoring project %s with pending allocation", charge_code)
-
-            LOG.info("%s is inactive, with %d servers. Last active on %s", charge_code, len(servers), alloc_json["expiration_date"])
+        LOG.info(f"Checking project {charge_code}")
+        if project_is_expired(charge_code, grace_period, ignore_pending, api_token, LOG):
             for server in servers:
                 if dry_run:
                     LOG.info("DRY-RUN: Shelving server %s:%s", server.id, server.name)
