@@ -22,6 +22,7 @@ dependencies = [
   "oslo.config",
   "oslo.service",
   "oslo.log",
+  "iso8601",
 ]
 
 
@@ -38,3 +39,4 @@ dev = [
 [project.scripts]
 periodic_inspector = "hammers.periodic_node_inspector:main"
 floating_ip_reaper = "hammers.ip_cleaner:launch_main"
+expired_project_reaper = "hammers.expired_project_cleaner:launch_main"

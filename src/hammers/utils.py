@@ -5,12 +5,16 @@ import json
 from collections import OrderedDict
 from collections.abc import Generator
 from urllib.parse import urlencode
+from datetime import datetime as DateTime
+from datetime import timezone as TimeZone
+from datetime import timedelta as TimeDelta
 
 import iso8601
 from openstack import resource
 from openstack.baremetal.v1.node import Node as IronicNode
 from openstack.connection import Connection
 from openstack.reservation.v1.host import Host as BlazarHost
+import requests
 
 
 def pp(item: dict) -> None:
@@ -145,3 +149,36 @@ def ironic_nodes_with_reservation_status(connection: Connection) -> Generator[di
         else:
             n.blazar_reserved = True
         yield n
+
+
+def grace_period_expired(last_alloc_str: str, grace_period: TimeDelta) -> bool:
+    """Return true if resource hasn't been updated in longer than grace period."""
+    last_updated = iso8601.parse_date(last_alloc_str)
+    now = DateTime.now(tz=TimeZone.utc)
+
+    # explicitly time of last update is older than expiry time
+    return last_updated < (now - grace_period)
+
+
+def project_is_expired(charge_code, grace_period, ignore_pending, api_token, log):
+    """Return true if the project is expired, given grace period and pending allocation criteria"""
+    api_url = f"https://chameleoncloud.org/admin/allocations/api/view/{charge_code}/?token={api_token}"
+    res = requests.get(api_url)
+    try:
+        res.raise_for_status()
+        alloc_json = res.json()
+    except (requests.HTTPError, requests.exceptions.JSONDecodeError):
+        # For these exceptions, we assume the project has not expired
+        log.debug("Error fetching allocation data for %s. Status %s", charge_code, res.status_code)
+        return False
+    if alloc_json["is_active"]:
+        log.debug("Project %s is active", charge_code)
+        return False
+    if ignore_pending and alloc_json["has_pending_allocation"]:
+        log.debug("Project %s has pending allocation", charge_code)
+        return False
+    if not grace_period_expired(alloc_json["expiration_date"], grace_period):
+        log.debug("Project %s within grace period", charge_code)
+        return False
+    log.debug("Project %s has expired", charge_code)
+    return True
