@@ -123,17 +123,18 @@ def main(arg_list: list[str]) -> None:
         reservable_ips = {r.floating_ip_address for r in conn.reservation.floatingips()}
     except Exception as ex:
         print("couldn't check reservable FIPs:", ex)
-    else:
-        routers = find_idle_routers(
-            conn=conn, grace_period=grace_period, ip_whitelist=reservable_ips
-        )
-        for r in routers:
-            if args.dry_run:
-                LOG.info("DRY-RUN: remove router %s:%s", r.id, r.name)
+        reservable_ips = []
+    
+    routers = find_idle_routers(
+        conn=conn, grace_period=grace_period, ip_whitelist=reservable_ips
+    )
+    for r in routers:
+        if args.dry_run:
+            LOG.info("DRY-RUN: remove router %s:%s", r.id, r.name)
 
-            if not args.dry_run:
-                LOG.info("deleting unused router %s:%s", r.id, r.name)
-                conn.delete_router(r.id)
+        if not args.dry_run:
+            LOG.info("deleting unused router %s:%s", r.id, r.name)
+            conn.delete_router(r.id)
 
 
 def launch_main():
