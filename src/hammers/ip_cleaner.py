@@ -109,7 +109,6 @@ def main(arg_list: list[str]) -> None:
     grace_period = TimeDelta(days=args.grace_days)
 
     conn = openstack.connect(cloud=args.cloud)
-    reservable_ips = {r.floating_ip_address for r in conn.reservation.floatingips()}
 
     fips = find_idle_floating_ips(conn=conn, grace_period=grace_period)
     for f in fips:
@@ -120,16 +119,21 @@ def main(arg_list: list[str]) -> None:
             LOG.info("deleting unused floating IP %s:%s", f.id, f.floating_ip_address)
             conn.delete_floating_ip(f.id)
 
-    routers = find_idle_routers(
-        conn=conn, grace_period=grace_period, ip_whitelist=reservable_ips
-    )
-    for r in routers:
-        if args.dry_run:
-            LOG.info("DRY-RUN: remove router %s:%s", r.id, r.name)
+    try:
+        reservable_ips = {r.floating_ip_address for r in conn.reservation.floatingips()}
+    except Exception as ex:
+        print("couldn't check reservable FIPs:", ex)
+    else:
+        routers = find_idle_routers(
+            conn=conn, grace_period=grace_period, ip_whitelist=reservable_ips
+        )
+        for r in routers:
+            if args.dry_run:
+                LOG.info("DRY-RUN: remove router %s:%s", r.id, r.name)
 
-        if not args.dry_run:
-            LOG.info("deleting unused router %s:%s", r.id, r.name)
-            conn.delete_router(r.id)
+            if not args.dry_run:
+                LOG.info("deleting unused router %s:%s", r.id, r.name)
+                conn.delete_router(r.id)
 
 
 def launch_main():
