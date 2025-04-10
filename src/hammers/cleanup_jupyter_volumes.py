@@ -4,6 +4,7 @@ from collections import defaultdict
 import logging
 import argparse
 import re
+import os
 import sys
 from datetime import timedelta as TimeDelta
 from kubernetes import client, config
@@ -50,19 +51,14 @@ def parse_args(args: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--dry-run",
         action="store_true",
+        default=os.environ.get('HAMMERS_DRY_RUN'),
         help="print out which servers would be shelved, instead of shelving them.",
     )
     parser.add_argument("--debug", action="store_true", help="increase log verbosity.")
     parser.add_argument(
-        "--grace-days",
-        type=int,
-        default=0,
-        help="How many days does a resource need to be unused before we'll clean it up",
-    )
-    parser.add_argument(
         "--portal-api-token",
         type=str,
-        required=True,
+        default=os.environ.get('HAMMERS_PORTAL_API_TOKEN'),
         help="API token for portal",
     )
     parser.add_argument(
@@ -73,18 +69,19 @@ def parse_args(args: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--keycloak-url",
         type=str,
-        default="https://auth.chameleoncloud.org/auth",
+        default=os.environ.get("HAMMERS_KEYCLOAK_URL", "https://auth.chameleoncloud.org/auth"),
         help="The cloud to use for OpenStack connection.",
     )
     parser.add_argument(
         "--keycloak-client-id",
         type=str,
-        default="portal-admin",
+        default=os.environ.get("HAMMERS_KEYCLOAK_CLIENT_ID", "portal-admin"),
         help="Keycloak admin client id.",
     )
     parser.add_argument(
         "--keycloak-client-secret",
         type=str,
+        default=os.environ.get("HAMMERS_KEYCLOAK_CLIENT_SECRET"),
         help="Keycloak admin client secret.",
     )
     parser.add_argument(
@@ -95,7 +92,7 @@ def parse_args(args: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--kube-namespace",
         type=str,
-        default="jupyter",
+        default=os.environ.get("HAMMERS_KUBE_NAMESPACE"),
         help="Kubernetes namespace to use.",
     )
     return parser.parse_args(args)
@@ -139,8 +136,9 @@ def main(arg_list: list[str]) -> None:
                         pass
             else:
                 LOG.info("User %s has an active project, skipping", username)
-        except ValueError:
-            LOG.info("Could not get projects for user %s", username)
+        except Exception as e:
+            LOG.error("Could not get projects for user %s", username)
+            LOG.error(e)
 
 
 def launch_main():
