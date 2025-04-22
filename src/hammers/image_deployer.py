@@ -148,7 +148,7 @@ def get_image_build_timestamp(image):
     return datetime.datetime.strptime(build_timestamp, "%Y-%m-%d %H:%M:%S.%f")
 
 
-def archive_image(image):
+def archive_image(image_connection, image):
     logging.debug(f"Renaming existing image {image.name}.")
     archive_date = get_image_build_timestamp(image)
     image_connection.image.update_image(
@@ -176,7 +176,7 @@ def promote_image(image_connection, image_name, image_disk_name, new_image):
         logging.info(f"Image {image_name} updated to {new_image.id} : " +
                      f"{build_timestamp}")
     elif len(existing_images) == 1:
-        archive_image(existing_images[0])
+        archive_image(image_connection, existing_images[0])
         image_connection.image.update_image(new_image.id,
                                             name=image_disk_name,
                                             visibility="public")
