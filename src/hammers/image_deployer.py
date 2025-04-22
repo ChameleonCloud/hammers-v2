@@ -62,8 +62,10 @@ def get_available_images(
         logging.debug(f"Current objects: {current_objects}")
         for object in islice(current_objects, 1, None):
             object_name = object.split("/")[-1]
+            logging.debug(f"Checking object: {object_name}")
             if object_name.endswith(image_name + ".manifest"):
-                name = object_name.rstrip(".manifest")
+                name = object_name[:-len(".manifest")]
+                logging.debug(f"Found image name: {name}")
                 available_images.append(
                     Image(name,
                           image_type,
@@ -72,6 +74,7 @@ def get_available_images(
                           current_path)
                 )
 
+    logging.debug(f"Found available images: {available_images}")
     return available_images
 
 
@@ -86,7 +89,7 @@ def get_site_images(connection):
     return images
 
 
-def should_sync_image(image_disk_name, site_images, current):
+def should_sync_image(image_connection, image_disk_name, site_images, current):
     if image_disk_name in site_images:
         logging.debug(f"Image {image_disk_name} already in site images.")
         image = image_connection.image.find_image(image_disk_name)
@@ -258,7 +261,7 @@ def do_sync(storage_url,
     images_to_sync = []
     for available_image in available_images:
         current = current_values[available_image.name]
-        if should_sync_image(available_image.disk_name, site_images, current):
+        if should_sync_image(image_connection, available_image.disk_name, site_images, current):
             images_to_sync.append(available_image)
 
     num_available_images = len(available_images)
