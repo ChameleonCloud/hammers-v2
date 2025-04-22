@@ -36,7 +36,7 @@ $ image_deployer -h
 
 Instally optional dependencies if desired:
 ```
-pip install .[dev]
+pip install '.[dev]'
 ```
 
 # To Dos
