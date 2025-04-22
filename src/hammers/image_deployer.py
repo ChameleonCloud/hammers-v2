@@ -173,7 +173,7 @@ def promote_image(image_connection, image_name, image_disk_name, new_image):
         image_connection.image.update_image(new_image.id,
                                             name=image_disk_name,
                                             visibility="public")
-        logging.info(f"Image {image_name} updated to {new_image.id} : " +
+        logging.info(f"Image {image_name} updated to {new_image.id}: " +
                      f"{build_timestamp}")
     elif len(existing_images) == 1:
         archive_image(image_connection, existing_images[0])
@@ -182,7 +182,7 @@ def promote_image(image_connection, image_name, image_disk_name, new_image):
                                             visibility="public")
         old_image_id = existing_images[0].id
         old_build_timestamp = get_image_build_timestamp(existing_images[0])
-        logging.info(f"Image {image_name} updated to {new_image.id} : " +
+        logging.info(f"Image {image_name} updated to {new_image.id}: " +
                      f"{build_timestamp} from {old_image_id}:" +
                      f"{old_build_timestamp}")
     else:
