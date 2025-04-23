@@ -19,6 +19,7 @@ As for deployment, the plan is to run this in parallel with hammers v1, and incr
 - [Periodic Node Inspector](docs/periodic_node_inspector.md)
 - [Floating IP (and router) Reaper](docs/ip_cleaner.md)
 - [Image Deployer](docs/image_deployer.md)
+- [Set Image Property](docs/set_image_property.md)
 
 # Running Hammers
 
@@ -42,3 +43,4 @@ pip install '.[dev]'
 # To Dos
 
 - Add tests for image deployer
+- Add tests for set image property
