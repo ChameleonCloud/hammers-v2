@@ -37,7 +37,7 @@ OpenStack client.
 
 After installing the dependencies, you can run the tool as follows:
 ```
-python3 site_tools/image_deployer.py --site-yaml ~/site.yaml
+image_deployer --site-yaml ~/site.yaml
 ```
 
 Additionally you can specify either `--dry-run` to see which images

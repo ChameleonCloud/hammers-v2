@@ -46,6 +46,25 @@ def get_available_images(
         scope,
         current_values,
         image_type):
+    """
+    This method loads the names of available images from the central image
+    store. It reads from the current values, which are stored in the
+    following format:
+    {
+        "CC-Ubuntu22.04": "20250422-v1-amd",
+        "CC-Ubuntu22.04-CUDA": "20250422-v1-amd",
+        "CC-Ubuntu24.04": "20250422-v1-amd",
+        "CC-Ubuntu24.04-CUDA": "20250422-v1-amd",
+        "CC-Ubuntu24.04-ROCm": "20250422-v1-amd",
+        "CC-Ubuntu22.04-ARM64": "20250422-v1-arm",
+        "CC-Ubuntu24.04-ARM64": "20250422-v1-arm",
+        "CC-CentOS9-Stream": "20250422-v1-centos"
+    }
+
+    It also validates that the images specified in the current values
+    are actually present in the central image store and adds those
+    that are present to the list of available images.
+    """
     available_images = []
 
     for image_name in current_values.keys():
@@ -103,37 +122,36 @@ def should_sync_image(image_connection, image_disk_name, site_images, current):
     return True
 
 
-def download_object_to_file(storage_url, path, file_name):
+def download_object_to_file(storage_url, path, file_name, temp_file):
     url = f"{storage_url}/{path}/{file_name}"
     response = requests.get(url, stream=True)
 
     if response.status_code != 200:
         raise Exception(f"Error downloading object {file_name}: {response.content}")
 
-    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-        for chunk in response.iter_content(chunk_size=65536):
-            temp_file.write(chunk)
-            temp_file.flush()
+    for chunk in response.iter_content(chunk_size=65536):
+        temp_file.write(chunk)
+        temp_file.flush()
+
     logging.debug(f"Downloaded object to {temp_file.name}.")
-    return temp_file
 
 
 def upload_image_to_glance(image_connection,
                            image_prefix,
                            image_disk_name,
-                           image_file_name,
+                           temp_file,
                            disk_format,
                            manifest_data):
     image_prefix_name = image_prefix + image_disk_name
 
     logging.debug(f"Uploading image {image_disk_name} to Glance.")
-    with open(image_file_name, "rb") as image_data:
-        new_image = image_connection.create_image(name=image_prefix_name,
-                                                  disk_format=disk_format,
-                                                  container_format="bare",
-                                                  visibility="private",
-                                                  data=image_data,
-                                                  **manifest_data)
+    temp_file.seek(0)
+    new_image = image_connection.create_image(name=image_prefix_name,
+                                                disk_format=disk_format,
+                                                container_format="bare",
+                                                visibility="private",
+                                                data=temp_file,
+                                                **manifest_data)
     logging.debug(f"Uploaded image {new_image.name}.")
     return new_image
 
@@ -194,8 +212,6 @@ def promote_image(image_connection, image_name, image_disk_name, new_image):
         logging.error(error)
 
 
-
-
 def get_manifest_data(manifest_url):
     response = requests.get(manifest_url)
     if response.status_code != 200:
@@ -210,6 +226,8 @@ def sync_image(storage_url,
                image_prefix="_testing",
                image_type="qcow2",
                dry_run=False):
+    """Sync a single image from the central image store to the site."""
+
     # TODO: move dry run to more of the steps
     if dry_run:
         logging.info(f"DRY RUN: Syncing image {image.name}.")
@@ -222,25 +240,22 @@ def sync_image(storage_url,
         logging.debug(f"Downloaded {image.name} manifest: {manifest_data}, downloading image file.")
 
         try:
-            temp_file = download_object_to_file(
-                storage_url,
-                image.container_path,
-                image.disk_name
-            )
+            with tempfile.NamedTemporaryFile(delete=True) as temp_file:
+                download_object_to_file(
+                    storage_url,
+                    image.container_path,
+                    image.disk_name,
+                    temp_file
+                )
 
-            glance_image = upload_image_to_glance(
-                image_connection,
-                image_prefix,
-                image.disk_name,
-                temp_file.name,
-                image_type,
-                manifest_data
-            )
-
-            try:
-                temp_file.close()
-            except Exception as delete_error:
-                logging.error(f"Error deleting temporary file: {delete_error}. Manual cleanup required.")
+                glance_image = upload_image_to_glance(
+                    image_connection,
+                    image_prefix,
+                    image.disk_name,
+                    temp_file,
+                    image_type,
+                    manifest_data
+                )
 
             promote_image(image_connection, image.name, image.disk_name, glance_image)
 
@@ -256,7 +271,7 @@ def do_sync(storage_url,
             image_prefix="testing_",
             image_type="qcow2",
             dry_run=False):
-
+    """iterate through latest images from the central image store and sync to the site"""
 
     images_to_sync = []
     for available_image in available_images:
@@ -325,7 +340,9 @@ def main(arg_list: list[str]) -> None:
     scope = site.get("scope", "prod")
     image_type = site.get("image_type", "qcow2")
     image_prefix = site.get("image_prefix", "testing_")
-    image_store_cloud = site.get("image_store_cloud", "uc_dev")
+    image_store_cloud = site.get("image_store_cloud")
+    if image_store_cloud is None:
+        raise Exception("The image_store_cloud is required in your site.yaml config!")
     storage_url = site.get("object_store_url")
     if storage_url is None:
         raise Exception("The object_store_url is required in your site.yaml config!")

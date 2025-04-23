@@ -24,7 +24,6 @@ dependencies = [
   "oslo.log",
   "iso8601",
   "pyyaml",
-  "openstacksdk>1.0.1",
 ]
 
 
