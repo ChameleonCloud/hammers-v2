@@ -35,12 +35,18 @@ Then you can reference the hammers directly:
 $ image_deployer -h
 ```
 
-Instally optional dependencies if desired:
+# Running Tests
+
+To run the tests you'll need to install optional dependencies:
 ```
 pip install '.[dev]'
 ```
 
+You can run the tests with tox:
+```
+tox
+```
+
 # To Dos
 
-- Add tests for image deployer
 - Add tests for set image property
