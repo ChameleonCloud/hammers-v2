@@ -11,11 +11,12 @@ from hammers import image_deployer
 
 
 class FakeResponse:
-    def __init__(self, status_code=200, text="", content=b"", chunks=None):
+    def __init__(self, status_code=200, text="", content=b"", chunks=None, headers=None):
         self.status_code = status_code
         self.text = text
         self.content = content
         self._chunks = chunks or []
+        self.headers = headers or {}
 
     def iter_content(self, chunk_size=1):
         for chunk in self._chunks:

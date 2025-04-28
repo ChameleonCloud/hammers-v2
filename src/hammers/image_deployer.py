@@ -2,6 +2,7 @@ import argparse
 import datetime
 import json
 import logging
+import os
 import requests
 import sys
 import tempfile
@@ -10,7 +11,7 @@ import yaml
 import openstack
 
 from itertools import islice
-
+from tqdm import tqdm
 
 class Image:
     def __init__(self, name, type, base_container, scope, current_path):
@@ -26,6 +27,45 @@ class Image:
 
     def __str__(self):
         return f"Image(name={self.name})"
+
+
+class NullProgressBar:
+    def __init__(self, *args, **kwargs):
+        self.n = 0
+        self.total = kwargs.get('total', 0)
+
+    def update(self, value):
+        self.n += value
+
+    def close(self):
+        pass
+
+
+class ProgressFileWrapper:
+    def __init__(
+            self,
+            file_obj,
+            total_size,
+            desc="Uploading",
+            show_progress=False):
+        self.file_obj = file_obj
+        self.total_size = total_size
+        self.progress_bar = (
+            tqdm(total=total_size, unit='iB', unit_scale=True, desc=desc)
+            if show_progress else NullProgressBar()
+        )
+
+    def read(self, size=-1):
+        chunk = self.file_obj.read(size)
+        self.progress_bar.update(len(chunk))
+        return chunk
+
+    def __getattr__(self, attr):
+        return getattr(self.file_obj, attr)
+
+    def close(self):
+        self.progress_bar.close()
+        self.file_obj.close()
 
 
 def get_openstack_connection(cloud_name):
@@ -143,16 +183,35 @@ def should_sync_image(image_connection, image_name, site_images, current):
     return True
 
 
-def download_object_to_file(storage_url, path, file_name, temp_file):
+def download_object_to_file(
+        storage_url,
+        path,
+        file_name,
+        temp_file,
+        show_progress=False):
     url = f"{storage_url}/{path}/{file_name}"
     response = requests.get(url, stream=True)
 
     if response.status_code != 200:
         raise Exception(f"Error downloading object {file_name}: {response.content}")
 
-    for chunk in response.iter_content(chunk_size=65536):
+    total_size = int(response.headers.get('Content-Length', 0))
+    chunk_size = 65536  # 64 KB
+
+    progress_bar = (
+        tqdm(total=total_size, unit='iB', unit_scale=True, desc=f"Downloading {file_name}")
+        if show_progress else NullProgressBar()
+    )
+
+    for chunk in response.iter_content(chunk_size=chunk_size):
         temp_file.write(chunk)
         temp_file.flush()
+        progress_bar.update(len(chunk))
+
+    progress_bar.close()
+
+    if total_size != 0 and progress_bar.n != total_size:
+        raise Exception(f"Download incomplete for {file_name}")
 
     logging.debug(f"Downloaded object to {temp_file.name}.")
 
@@ -162,17 +221,30 @@ def upload_image_to_glance(image_connection,
                            image_name,
                            temp_file,
                            disk_format,
-                           manifest_data):
+                           manifest_data,
+                           show_progress=False):
     image_prefix_name = image_prefix + image_name
 
     logging.debug(f"Uploading image {image_name} to Glance.")
+    temp_file.seek(0, os.SEEK_END)
+    total_size = temp_file.tell()
     temp_file.seek(0)
+
+    wrapped_file = ProgressFileWrapper(
+        temp_file,
+        total_size,
+        desc=f"Uploading {image_name}",
+        show_progress=show_progress
+    )
+
     new_image = image_connection.create_image(name=image_prefix_name,
-                                                disk_format=disk_format,
-                                                container_format="bare",
-                                                visibility="private",
-                                                data=temp_file,
-                                                **manifest_data)
+                                              disk_format=disk_format,
+                                              container_format="bare",
+                                              visibility="private",
+                                              data=wrapped_file,
+                                              **manifest_data)
+    wrapped_file.close()
+
     logging.debug(f"Uploaded image {new_image.name}.")
     return new_image
 
@@ -256,7 +328,8 @@ def sync_image(storage_url,
                current=None,
                image_prefix="_testing",
                image_type="qcow2",
-               dry_run=False):
+               dry_run=False,
+               show_progress=False):
     """Sync a single image from the central image store to the site."""
 
     # TODO: move dry run to more of the steps
@@ -276,7 +349,8 @@ def sync_image(storage_url,
                     storage_url,
                     image.container_path,
                     image.disk_name,
-                    temp_file
+                    temp_file,
+                    show_progress,
                 )
 
                 glance_image = upload_image_to_glance(
@@ -285,7 +359,8 @@ def sync_image(storage_url,
                     image.name,
                     temp_file,
                     image_type,
-                    manifest_data
+                    manifest_data,
+                    show_progress,
                 )
 
             promote_image(image_connection, image.name, glance_image)
@@ -301,7 +376,8 @@ def do_sync(storage_url,
             current_values={},
             image_prefix="testing_",
             image_type="qcow2",
-            dry_run=False):
+            dry_run=False,
+            show_progress=False):
     """iterate through latest images from the central image store and sync to the site"""
 
     images_to_sync = []
@@ -327,7 +403,8 @@ def do_sync(storage_url,
             current=current_values[image_to_sync.name],
             image_prefix=image_prefix,
             image_type=image_type,
-            dry_run=dry_run
+            dry_run=dry_run,
+            show_progress=show_progress,
         )
     logging.info("Sync complete.")
 
@@ -345,6 +422,8 @@ def parse_args(args: list[str]) -> argparse.Namespace:
                         help="Perform a dry run without making any changes.")
     parser.add_argument("--debug", action="store_true",
                         help="Enable debug logging")
+    parser.add_argument("--show-progress", action="store_true",
+                        help="Show the progress when downloading and uploading images.")
     # TODO(pdmars): add a force sync flag that overrides the current check
 
     return parser.parse_args(args)
@@ -407,7 +486,8 @@ def main(arg_list: list[str]) -> None:
         current_values=current_values,
         image_prefix=image_prefix,
         image_type=image_type,
-        dry_run=args.dry_run
+        dry_run=args.dry_run,
+        show_progress=args.show_progress,
     )
 
 
