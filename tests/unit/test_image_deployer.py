@@ -25,6 +25,26 @@ class FakeResponse:
         return json.loads(self.text)
 
 
+class DummyImage:
+    def __init__(self, current_value):
+        self.properties = {"current": current_value}
+
+
+class DummyImageService:
+    def __init__(self, images_to_return):
+        self._images = images_to_return
+
+    def images(self, name):
+        return self._images
+
+
+class DummyConn:
+    def __init__(self, images_to_return=None):
+        if images_to_return is None:
+            images_to_return = []
+        self.image = DummyImageService(images_to_return)
+
+
 def test_parse_args_minimal_required():
     args = ["--site-yaml", "mysite.yaml"]
     parsed = image_deployer.parse_args(args)
@@ -65,51 +85,24 @@ def test_get_current_value_failure(monkeypatch):
     assert "Error getting current value" in str(ex.value)
 
 
-def test_should_sync_image_not_present():
-    class DummyConn: pass
-    conn = DummyConn()
+@pytest.mark.parametrize(
+    "image_name, site_images, images_to_return, current, expected_result",
+    [
+        # Not present in site images -> should sync
+        ("CC-Ubuntu24.04", ["CC-Ubuntu22.04"], [], "v1", True),
+        # Present but not current -> should sync
+        ("CC-Ubuntu24.04", ["CC-Ubuntu24.04"], [DummyImage("old")], "new", True),
+        # Present and current -> should not sync
+        ("CC-Ubuntu24.04", ["CC-Ubuntu24.04"], [DummyImage("v1")], "v1", False),
+        # Multiple images -> should not sync
+        ("CC-Ubuntu24.04", ["CC-Ubuntu24.04"], [DummyImage("v1"), DummyImage("v1")], "v1", False),
+    ]
+)
+def test_should_sync_image(image_name, site_images, images_to_return, current, expected_result):
+    conn = DummyConn(images_to_return)
     assert image_deployer.should_sync_image(
-        conn, "disk.img", ["other.img"], current="v1"
-    ) is True
-
-
-def test_should_sync_image_present_but_not_current(monkeypatch):
-    class DummyImage:
-        def __init__(self):
-            self.properties = {"current": "old"}
-
-    class DummyImageService:
-        def find_image(self, name):
-            return DummyImage()
-
-    class DummyConn:
-        image = DummyImageService()
-
-    conn = DummyConn()
-    assert image_deployer.should_sync_image(
-        conn,
-        "disk.img",
-        ["disk.img"],
-        current="new"
-    ) is True
-
-
-def test_should_not_sync_image_present():
-    class DummyImage:
-        def __init__(self):
-            self.properties = {"current": "v1"}
-
-    class DummyImageService:
-        def find_image(self, name):
-            return DummyImage()
-
-    class DummyConn:
-        image = DummyImageService()
-
-    conn = DummyConn()
-    assert image_deployer.should_sync_image(
-        conn, "disk.img", ["disk.img"], current="v1"
-    ) is False
+        conn, image_name, site_images, current
+    ) is expected_result
 
 
 def test_download_object_to_file_success(tmp_path, monkeypatch):
