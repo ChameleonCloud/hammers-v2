@@ -108,16 +108,16 @@ def get_site_images(connection):
     return images
 
 
-def should_sync_image(image_connection, image_disk_name, site_images, current):
-    if image_disk_name in site_images:
-        logging.debug(f"Image {image_disk_name} already in site images.")
-        image = image_connection.image.find_image(image_disk_name)
+def should_sync_image(image_connection, image_name, site_images, current):
+    if image_name in site_images:
+        logging.debug(f"Image {image_name} already in site images.")
+        image = image_connection.image.find_image(image_name)
         image_properties = image.properties
         logging.debug(f"Image properties: {image_properties}")
         image_current_value = image_properties.get("current", None)
-        logging.debug(f"Image {image_disk_name} current value: {image_current_value}")
+        logging.debug(f"Image {image_name} current value: {image_current_value}")
         if image_current_value is not None and image_current_value == current:
-            logging.debug(f"Image {image_disk_name} is already current.")
+            logging.debug(f"Image {image_name} is already current.")
             return False
     return True
 
@@ -138,13 +138,13 @@ def download_object_to_file(storage_url, path, file_name, temp_file):
 
 def upload_image_to_glance(image_connection,
                            image_prefix,
-                           image_disk_name,
+                           image_name,
                            temp_file,
                            disk_format,
                            manifest_data):
-    image_prefix_name = image_prefix + image_disk_name
+    image_prefix_name = image_prefix + image_name
 
-    logging.debug(f"Uploading image {image_disk_name} to Glance.")
+    logging.debug(f"Uploading image {image_name} to Glance.")
     temp_file.seek(0)
     new_image = image_connection.create_image(name=image_prefix_name,
                                                 disk_format=disk_format,
@@ -158,12 +158,22 @@ def upload_image_to_glance(image_connection,
 
 def get_image_build_timestamp(image):
     build_timestamp = image.properties.get("build-timestamp")
+
     if build_timestamp is None:
         error = f"Unable to find build-timestamp on image {image.id}, " + \
                 "using the current date instead."
         logging.error(error)
-        return datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    return datetime.datetime.strptime(build_timestamp, "%Y-%m-%d %H:%M:%S.%f")
+        return datetime.datetime.now().strftime("%Y%m%d %H%M%S.%f")
+
+    try:
+        return datetime.datetime.strptime(build_timestamp, "%Y-%m-%d %H:%M:%S.%f")
+    except ValueError:
+        try:
+            # If that fails, try treating it as a float POSIX timestamp
+            ts_float = float(build_timestamp)
+            return datetime.datetime.fromtimestamp(ts_float)
+        except ValueError:
+            raise Exception(f"Invalid build_timestamp format: {build_timestamp}")
 
 
 def archive_image(image_connection, image):
@@ -178,25 +188,25 @@ def archive_image(image_connection, image):
     logging.debug(f"Renamed image {image.name} to {archived_name}.")
 
 
-def promote_image(image_connection, image_name, image_disk_name, new_image):
+def promote_image(image_connection, image_name, new_image):
     build_timestamp = get_image_build_timestamp(new_image)
     existing_images = list(
         image_connection.image.images(
-            name=image_disk_name,
+            name=image_name,
             visibility="public"
         )
     )
-    logging.debug(f"Promoting image {image_disk_name}.")
+    logging.debug(f"Promoting image {image_name}.")
     if len(existing_images) == 0:
         image_connection.image.update_image(new_image.id,
-                                            name=image_disk_name,
+                                            name=image_name,
                                             visibility="public")
         logging.info(f"Image {image_name} updated to {new_image.id}: " +
                      f"{build_timestamp}")
     elif len(existing_images) == 1:
         archive_image(image_connection, existing_images[0])
         image_connection.image.update_image(new_image.id,
-                                            name=image_disk_name,
+                                            name=image_name,
                                             visibility="public")
         old_image_id = existing_images[0].id
         old_build_timestamp = get_image_build_timestamp(existing_images[0])
@@ -208,7 +218,7 @@ def promote_image(image_connection, image_name, image_disk_name, new_image):
         # don't bother with the rest of this process if something is in this
         # state
         error = "There should never be more than 1 public image with the " + \
-                f"same name: {image_disk_name}! Manual intervention required."
+                f"same name: {image_name}! Manual intervention required."
         logging.error(error)
 
 
@@ -251,16 +261,16 @@ def sync_image(storage_url,
                 glance_image = upload_image_to_glance(
                     image_connection,
                     image_prefix,
-                    image.disk_name,
+                    image.name,
                     temp_file,
                     image_type,
                     manifest_data
                 )
 
-            promote_image(image_connection, image.name, image.disk_name, glance_image)
+            promote_image(image_connection, image.name, glance_image)
 
         except Exception as e:
-            logging.error(f"Error syncing image {image.disk_name}: {e}. Manual intervention required.")
+            logging.error(f"Error syncing image {image.name}: {e}. Manual intervention required.")
 
 
 def do_sync(storage_url,
@@ -276,7 +286,7 @@ def do_sync(storage_url,
     images_to_sync = []
     for available_image in available_images:
         current = current_values[available_image.name]
-        if should_sync_image(image_connection, available_image.disk_name, site_images, current):
+        if should_sync_image(image_connection, available_image.name, site_images, current):
             images_to_sync.append(available_image)
 
     num_available_images = len(available_images)
