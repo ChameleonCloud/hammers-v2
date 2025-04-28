@@ -1,3 +1,4 @@
+import datetime
 import json
 import pytest
 import requests
@@ -243,3 +244,30 @@ def test_get_site_images(status, payload, raises):
         assert len(images) == len(payload)
         for expected, actual in zip(payload, images):
             assert expected.name == actual
+
+
+@pytest.mark.parametrize("properties, expected_type, raises", [
+    ({"build-timestamp": "2024-04-27 15:30:45.123456"}, datetime.datetime, False),
+    ({"build-timestamp": "1677628504.897832"}, datetime.datetime, False),
+    ({}, str, True),
+    ({"build-timestamp": "invalid-timestamp"}, Exception, False),
+])
+def test_get_image_build_timestamp(properties, expected_type, raises, caplog):
+    image = mock.Mock()
+    image.properties = properties
+
+    if expected_type is Exception:
+        with pytest.raises(Exception, match="Invalid build_timestamp format"):
+            image_deployer.get_image_build_timestamp(image)
+    else:
+        result = image_deployer.get_image_build_timestamp(image)
+        if expected_type is str:
+            assert isinstance(result, str)
+            assert "_" not in result
+        else:
+            assert isinstance(result, expected_type)
+
+    if raises:
+        assert any("Unable to find build-timestamp" in message for message in caplog.text.splitlines())
+    else:
+        assert "Unable to find build-timestamp" not in caplog.text
