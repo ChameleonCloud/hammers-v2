@@ -34,7 +34,8 @@ Homepage = 'https://github.com/ChameleonCloud/hammers'
 dev = [
   "ruff",
   "pytest",
-  "freezegun"
+  "freezegun",
+  "tox",
   ]
 
 [project.scripts]

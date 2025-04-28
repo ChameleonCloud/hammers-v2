@@ -1,0 +1,245 @@
+import json
+import pytest
+import requests
+
+
+from unittest import mock
+
+
+from hammers import image_deployer
+
+
+class FakeResponse:
+    def __init__(self, status_code=200, text="", content=b"", chunks=None):
+        self.status_code = status_code
+        self.text = text
+        self.content = content
+        self._chunks = chunks or []
+
+    def iter_content(self, chunk_size=1):
+        for chunk in self._chunks:
+            yield chunk
+
+    def json(self):
+        return json.loads(self.text)
+
+
+def test_parse_args_minimal_required():
+    args = ["--site-yaml", "mysite.yaml"]
+    parsed = image_deployer.parse_args(args)
+
+    assert parsed.site_yaml == "mysite.yaml"
+    assert parsed.dry_run is False
+    assert parsed.debug is False
+
+
+def test_parse_args_dry_run_debug():
+    args = ["--dry-run", "--debug", "--site-yaml", "mysite.yaml"]
+    parsed = image_deployer.parse_args(args)
+
+    assert parsed.site_yaml == "mysite.yaml"
+    assert parsed.dry_run is True
+    assert parsed.debug is True
+
+
+def test_get_current_value_success(monkeypatch):
+    dummy = {"key": "value"}
+    resp = FakeResponse(status_code=200, text=json.dumps(dummy))
+    monkeypatch.setattr(requests, "get", lambda url: resp)
+
+    result = image_deployer.get_current_value(
+        "http://image/store",
+        "chameleon-supported-images",
+        "prod"
+    )
+    assert result == dummy
+
+
+def test_get_current_value_failure(monkeypatch):
+    resp = FakeResponse(status_code=404, content=b"not found")
+    monkeypatch.setattr(requests, "get", lambda url: resp)
+
+    with pytest.raises(Exception) as ex:
+        image_deployer.get_current_value("a", "b", "c")
+    assert "Error getting current value" in str(ex.value)
+
+
+def test_should_sync_image_not_present():
+    class DummyConn: pass
+    conn = DummyConn()
+    assert image_deployer.should_sync_image(
+        conn, "disk.img", ["other.img"], current="v1"
+    ) is True
+
+
+def test_should_sync_image_present_but_not_current(monkeypatch):
+    class DummyImage:
+        def __init__(self):
+            self.properties = {"current": "old"}
+
+    class DummyImageService:
+        def find_image(self, name):
+            return DummyImage()
+
+    class DummyConn:
+        image = DummyImageService()
+
+    conn = DummyConn()
+    assert image_deployer.should_sync_image(
+        conn,
+        "disk.img",
+        ["disk.img"],
+        current="new"
+    ) is True
+
+
+def test_should_not_sync_image_present():
+    class DummyImage:
+        def __init__(self):
+            self.properties = {"current": "v1"}
+
+    class DummyImageService:
+        def find_image(self, name):
+            return DummyImage()
+
+    class DummyConn:
+        image = DummyImageService()
+
+    conn = DummyConn()
+    assert image_deployer.should_sync_image(
+        conn, "disk.img", ["disk.img"], current="v1"
+    ) is False
+
+
+def test_download_object_to_file_success(tmp_path, monkeypatch):
+    chunks = [b"a", b"b", b"c"]
+    fake = FakeResponse(status_code=200, chunks=chunks)
+    monkeypatch.setattr(requests, "get", lambda url, stream=True: fake)
+
+    target = tmp_path / "out.bin"
+    with open(target, "wb+") as atempfile:
+        image_deployer.download_object_to_file(
+            "http://notneeded",
+            "/does/not/matter",
+            "notneeded",
+            atempfile
+        )
+
+    data = target.read_bytes()
+    assert data == b"".join(chunks)
+
+
+def test_download_object_to_file_failure(monkeypatch, tmp_path):
+    fake = FakeResponse(status_code=403, content=b"denied")
+    monkeypatch.setattr(requests, "get", lambda url, stream=True: fake)
+    with open(tmp_path / "dummy", "wb+") as atempfile:
+        with pytest.raises(Exception) as ex:
+            image_deployer.download_object_to_file("a", "b", "c", atempfile)
+    assert "Error downloading object" in str(ex.value)
+
+
+def test_get_available_images_success(monkeypatch):
+    storage_url = "http://image/store/url"
+    base = "chameleon-supported-images"
+    scope = "prod"
+    current_values = {"CC-Ubuntu22.04": "20250422-v1-amd",
+                      "CC-Ubuntu22.04-ARM": "20250422-v1-arm"}
+    image_type = "qcow2"
+
+    body = "\n".join([
+        "ignored-first-line",
+        f"{scope}/versions/20250422-v1-amd/CC-Ubuntu22.04.manifest",
+        f"{scope}/versions/20250422-v1-arm/CC-Ubuntu22.04-ARM.manifest",
+    ])
+    resp = FakeResponse(status_code=200, text=body)
+    monkeypatch.setattr(requests, "get", lambda url: resp)
+
+    imgs = image_deployer.get_available_images(
+        storage_url,
+        base,
+        scope,
+        current_values,
+        image_type
+    )
+    assert len(imgs) == 2
+
+    img = imgs[0]
+    assert isinstance(img, image_deployer.Image)
+    assert img.name == "CC-Ubuntu22.04"
+    assert img.manifest_name == "CC-Ubuntu22.04.manifest"
+    assert img.disk_name == "CC-Ubuntu22.04.qcow2"
+    assert img.current_path == "prod/versions/20250422-v1-amd"
+    assert img.container_path == "chameleon-supported-images/prod/versions/20250422-v1-amd"
+
+    img = imgs[1]
+    assert isinstance(img, image_deployer.Image)
+    assert img.name == "CC-Ubuntu22.04-ARM"
+    assert img.manifest_name == "CC-Ubuntu22.04-ARM.manifest"
+    assert img.disk_name == "CC-Ubuntu22.04-ARM.qcow2"
+    assert img.current_path == "prod/versions/20250422-v1-arm"
+    assert img.container_path == "chameleon-supported-images/prod/versions/20250422-v1-arm"
+
+
+def test_get_available_images_failure(monkeypatch):
+    monkeypatch.setattr(
+        requests,
+        "get",
+        lambda url: FakeResponse(status_code=500, content=b"bad")
+    )
+    with pytest.raises(Exception) as ex:
+        image_deployer.get_available_images("a", "b", "c", {"X": "1"}, "raw")
+    assert "Error getting available images" in str(ex.value)
+
+
+@pytest.mark.parametrize("status, payload, raises", [
+    (200, {"a": 1}, False),
+    (500, None, True),
+])
+def test_get_manifest_data(status, payload, raises, monkeypatch):
+    raised_ex = False
+    if status == 200:
+        text = json.dumps(payload)
+        fake = FakeResponse(status_code=200)
+        fake.text = text
+        monkeypatch.setattr(requests, "get", lambda url: fake)
+        result = image_deployer.get_manifest_data("http://goodurl")
+        assert result == payload
+    elif status == 500:
+        fake = FakeResponse(status_code=500, content=b"err")
+        monkeypatch.setattr(requests, "get", lambda url: fake)
+        with pytest.raises(Exception) as ex:
+            raised_ex = True
+            image_deployer.get_manifest_data("http://badurl")
+        assert "Error downloading object" in str(ex.value)
+    else:
+        pytest.fail("Unexpected status code run")
+    assert raised_ex == raises
+
+
+@pytest.mark.parametrize("status, payload, raises", [
+    ("success", [
+        mock.Mock(name="CC-Ubuntu22.04.raw"),
+        mock.Mock(name="CC-Ubuntu24.04.raw"),
+    ], False),
+    ("fail", Exception("Connection error"), True),
+])
+def test_get_site_images(status, payload, raises):
+    conn = mock.Mock()
+
+    if raises:
+        conn.image.images.side_effect = payload
+    else:
+        conn.image.images.return_value = payload
+
+    if raises:
+        with pytest.raises(Exception) as ex:
+            image_deployer.get_site_images(conn)
+        assert "Connection error" in str(ex.value)
+    else:
+        images = image_deployer.get_site_images(conn)
+
+        conn.image.images.assert_called_once_with(visibility="public")
+        assert isinstance(images, list)
+        assert len(images) == len(payload)
+        for expected, actual in zip(payload, images):
+            assert expected.name == actual
