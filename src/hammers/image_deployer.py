@@ -109,25 +109,15 @@ def get_site_images(connection):
 
 
 def should_sync_image(image_connection, image_name, site_images, current):
-    if image_name in site_images:
+    matching_images = [
+        site_image_name for site_image_name in site_images
+        if site_image_name == image_name
+    ]
+
+    if len(matching_images) == 1:
         logging.debug(f"Image {image_name} already in site images.")
 
-        images = list(image_connection.image.images(name=image_name))
-
-        if not images:
-            # this shouldn't happen by this point since we've already looked
-            # up site_images, but who knows, maybe it's gone now, if so
-            # we should sync
-            logging.warning(f"No images found with name {image_name}.")
-            return True
-
-        if len(images) > 1:
-            logging.warning(f"Multiple images found with name {image_name}. "
-                            "Aborting sync of this image. "
-                            "Manual intervention required.")
-            return False
-
-        image = images[0]
+        image = image_connection.image.find_image(image_name)
         image_properties = image.properties
         logging.debug(f"Image properties: {image_properties}")
         image_current_value = image_properties.get("current", None)
@@ -136,6 +126,12 @@ def should_sync_image(image_connection, image_name, site_images, current):
         if image_current_value is not None and image_current_value == current:
             logging.debug(f"Image {image_name} is already current.")
             return False
+
+    if len(matching_images)> 1:
+        logging.warning(f"Multiple images found with name {image_name}. "
+                            "Aborting sync of this image. "
+                            "Manual intervention required.")
+        return False
 
     return True
 
