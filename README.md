@@ -46,7 +46,3 @@ You can run the tests with tox:
 ```
 tox
 ```
-
-# To Dos
-
-- Add tests for set image property
