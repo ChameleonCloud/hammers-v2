@@ -117,7 +117,14 @@ def should_sync_image(image_connection, image_name, site_images, current):
     if len(matching_images) == 1:
         logging.debug(f"Image {image_name} already in site images.")
 
-        image = image_connection.image.find_image(image_name)
+        image = next(
+            image_connection.image.images(name=image_name, visibility="public"),
+            None
+        )
+        if image is None:
+            logging.warning(f"Image {image_name} with public visibility not found, syncing.")
+            return True
+
         image_properties = image.properties
         logging.debug(f"Image properties: {image_properties}")
         image_current_value = image_properties.get("current", None)
