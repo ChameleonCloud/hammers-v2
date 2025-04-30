@@ -182,3 +182,41 @@ def project_is_expired(charge_code, grace_period, ignore_pending, api_token, log
         return False
     log.debug("Project %s has expired", charge_code)
     return True
+
+
+def _get_access_token(keycloak_url, keycloak_client_id, keycloak_client_secret):
+    url = f"{keycloak_url}/realms/master/protocol/openid-connect/token"
+    data = {
+        'grant_type': 'client_credentials',
+        'client_id': keycloak_client_id,
+        'client_secret': keycloak_client_secret
+    }
+    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+    response = requests.post(url, data=data, headers=headers)
+    response.raise_for_status()
+    return response.json()['access_token']
+
+
+def get_user_id(username, keycloak_url, keycloak_client_id, keycloak_client_secret, access_token=None):
+    if not access_token:
+        access_token = _get_access_token(keycloak_url, keycloak_client_id, keycloak_client_secret)
+    url = f"{keycloak_url}/admin/realms/chameleon/users"
+    headers = {'Authorization': f'Bearer {access_token}'}
+    params = {"username": username}
+    response = requests.get(url, headers=headers, params=params)
+    response.raise_for_status()
+    users = response.json()
+    if users:
+        return users[0]['id']
+    raise Exception(f"User '{username}' not found")
+
+
+def get_user_groups(username, keycloak_url, keycloak_client_id, keycloak_client_secret, access_token=None):
+    if not access_token:
+        access_token = _get_access_token(keycloak_url, keycloak_client_id, keycloak_client_secret)
+    user_id = get_user_id(username, keycloak_url, keycloak_client_id, keycloak_client_secret, access_token)
+    url = f"{keycloak_url}/admin/realms/chameleon/users/{user_id}/groups"
+    headers = {'Authorization': f'Bearer {access_token}'}
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    return response.json()
