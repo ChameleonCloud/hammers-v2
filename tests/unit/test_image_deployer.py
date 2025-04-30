@@ -35,11 +35,12 @@ class DummyImageService:
     def __init__(self, images_to_return):
         self._images = images_to_return
 
-    def find_image(self, name):
-        for image in self._images:
-            if image.name == name:
-                return image
-        return None
+    def images(self, name=None, visibility=None):
+        filtered = [
+            image for image in self._images
+            if (name is None or image.name == name)
+        ]
+        return iter(filtered)
 
 
 class DummyConn:
@@ -90,20 +91,22 @@ def test_get_current_value_failure(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "image_name, site_images, images_to_return, current, expected_result",
+    "image_name, images_to_return, current, expected_result",
     [
         # Not present in site images -> should sync
-        ("CC-Ubuntu24.04", ["CC-Ubuntu22.04"], [], "v1", True),
+        ("CC-Ubuntu24.04", [], "v1", True),
         # Present but not current -> should sync
-        ("CC-Ubuntu24.04", ["CC-Ubuntu24.04"], [DummyImage("old", "CC-Ubuntu24.04")], "new", True),
+        ("CC-Ubuntu24.04", [DummyImage("old", "CC-Ubuntu24.04")], "new", True),
         # Present and current -> should not sync
-        ("CC-Ubuntu24.04", ["CC-Ubuntu24.04"], [DummyImage("v1", "CC-Ubuntu24.04")], "v1", False),
+        ("CC-Ubuntu24.04", [DummyImage("v1", "CC-Ubuntu24.04")], "v1", False),
         # Multiple images -> should not sync
-        ("CC-Ubuntu24.04", ["CC-Ubuntu24.04", "CC-Ubuntu24.04"], [], "v1", False),
+        ("CC-Ubuntu24.04", [DummyImage("v1", "CC-Ubuntu24.04"),
+                            DummyImage("v1", "CC-Ubuntu24.04")], "v1", False),
     ]
 )
-def test_should_sync_image(image_name, site_images, images_to_return, current, expected_result):
+def test_should_sync_image(image_name, images_to_return, current, expected_result):
     conn = DummyConn(images_to_return)
+    site_images = image_deployer.get_site_images(conn)
     assert image_deployer.should_sync_image(
         conn, image_name, site_images, current
     ) is expected_result
