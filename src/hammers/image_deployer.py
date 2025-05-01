@@ -269,19 +269,35 @@ def get_image_build_timestamp(image):
             raise Exception(f"Invalid build_timestamp format: {build_timestamp}")
 
 
-def archive_image(image_connection, image):
+def archive_image(image_connection,
+                  image,
+                  image_metadata_field="chameleon-supported"):
     logging.debug(f"Renaming existing image {image.name}.")
     archive_date = get_image_build_timestamp(image)
+    archived_name = f"{image.name}_{archive_date}"
     image_connection.image.update_image(
         image.id,
-        name=f"{image.name}_{archive_date}"
+        name=archived_name,
     )
-
-    archived_name = f"{image.name}_{archive_date}"
     logging.debug(f"Renamed image {image.name} to {archived_name}.")
 
+    action = f"{image_metadata_field}=no"
+    logging.debug(f"Setting '{action}' on image {image.id}.")
+    try:
+        image_connection.compute.set_image_metadata(
+            image.id,
+            **{image_metadata_field: "no"}
+        )
+        logging.debug(f"'{action}' successfully set on image {image.id}")
+    except Exception as e:
+        logging.error(f"Error tagging image {image.id} with '{action}': {e}. "
+                      "Manual intervention required.")
 
-def promote_image(image_connection, image_name, new_image):
+
+def promote_image(image_connection,
+                  image_name,
+                  new_image,
+                  image_metadata_field="chameleon-supported"):
     build_timestamp = get_image_build_timestamp(new_image)
     existing_images = list(
         image_connection.image.images(
@@ -326,6 +342,7 @@ def sync_image(storage_url,
                image_connection,
                image,
                current=None,
+               image_metadata_field="chameleon-supported",
                image_prefix="_testing",
                image_type="qcow2",
                dry_run=False,
@@ -363,7 +380,12 @@ def sync_image(storage_url,
                     show_progress,
                 )
 
-            promote_image(image_connection, image.name, glance_image)
+            promote_image(
+                image_connection,
+                image.name,
+                glance_image,
+                image_metadata_field=image_metadata_field
+            )
 
         except Exception as e:
             logging.error(f"Error syncing image {image.name}: {e}. Manual intervention required.")
@@ -374,6 +396,7 @@ def do_sync(storage_url,
             available_images,
             site_images,
             current_values={},
+            image_metadata_field="chameleon-supported",
             image_prefix="testing_",
             image_type="qcow2",
             dry_run=False,
@@ -401,6 +424,7 @@ def do_sync(storage_url,
             image_connection,
             image_to_sync,
             current=current_values[image_to_sync.name],
+            image_metadata_field=image_metadata_field,
             image_prefix=image_prefix,
             image_type=image_type,
             dry_run=dry_run,
@@ -447,6 +471,7 @@ def main(arg_list: list[str]) -> None:
         site = yaml.safe_load(f)
 
     base_container = site.get("image_container", "chameleon-supported-images")
+    image_metadata_field = site.get("image_metadata_field", "chameleon-supported")
     scope = site.get("scope", "prod")
     image_type = site.get("image_type", "qcow2")
     image_prefix = site.get("image_prefix", "testing_")
@@ -484,6 +509,7 @@ def main(arg_list: list[str]) -> None:
         available_images,
         site_images,
         current_values=current_values,
+        image_metadata_field=image_metadata_field,
         image_prefix=image_prefix,
         image_type=image_type,
         dry_run=args.dry_run,
