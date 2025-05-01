@@ -1,5 +1,6 @@
 ---
 image_container: chameleon-supported-images
+image_metadata_field: chameleon-supported
 image_type: qcow2
 image_prefix: testing_
 scope: prod
