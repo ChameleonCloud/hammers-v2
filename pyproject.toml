@@ -24,6 +24,7 @@ dependencies = [
   "oslo.log",
   "iso8601",
   "pyyaml",
+  "tqdm",
 ]
 
 
