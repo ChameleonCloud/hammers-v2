@@ -16,3 +16,5 @@ RUN pip install .
 
 VOLUME /etc/hammers
 VOLUME /var/log
+
+WORKDIR /etc/hammers
