@@ -63,8 +63,9 @@ def ensure_instance_is_snapshotted(
         snapshot_image = connection.create_image_snapshot(
             name=snapshot_name,
             server=instance,
-            wait=False,
+            wait=True,
         )
+        connection.image.update_image(snapshot_image, owner=instance.project_id)
         return snapshot_image
 
 
