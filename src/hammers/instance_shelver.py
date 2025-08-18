@@ -26,6 +26,18 @@ def get_instances_to_retire(connection: Connection) -> Generator[Server]:
         if not instance.flavor.original_name.startswith("m1"):
             continue
 
+        if instance.project_id in [
+            "570aad8999f7499db99eae22fe9b29bb",
+            "f6c7696906c04b3c89fc3bda9a1b8be0",
+        ]:
+            LOG.info(
+                "Skipping admin instance %s %s %s",
+                instance.name,
+                instance.id,
+                instance.project_id,
+            )
+            continue
+
         if instance.compute_host:
             yield instance
 
@@ -49,9 +61,10 @@ def ensure_instance_is_snapshotted(
         owner=instance.project_id,
     )
     for snap in existing_snapshots:
-        LOG.info(
-            "Snapshot %s already exists for instance %s, skipping snapshot creation.",
-            snapshot_name,
+        LOG.debug(
+            "Snapshot %s %s already exists for instance %s, skipping snapshot creation.",
+            snap.name,
+            snap.status,
             instance.name,
         )
         return snap
@@ -73,19 +86,19 @@ def retire_instance(
     connection: Connection,
     instance: Server,
     dry_run: bool,
-) -> None:
+) -> Server:
     """Retire non-reservable instances by shelving them.
 
-    1. shut down the instance
-    2. snapshot the instance, ensure owned by the project
-    3. shelve the instance (must wait for snapshot to complete)
-    4. lock the instance (shelved and locked counts towards quota)
+    1. lock the instance (shelved and locked counts towards quota)
+    2. shut down the instance
+    3. snapshot the instance, ensure owned by the project
+    4. shelve the instance (must wait for snapshot to complete)
     """
 
-    LOG.info("Locking instance %s %s", instance.name, instance.status)
+    # LOG.info("Locking instance %s %s", instance.name, instance.status)
 
-    if instance.status in ["ACTIVE"]:
-        LOG.info("Shutting down instance %s %s", instance.name, instance.status)
+    # if instance.status in ["ACTIVE"]:
+    #    LOG.info("Shutting down instance %s %s", instance.name, instance.status)
 
     snapshotted = False
     if instance.status in ["SHUTOFF"]:
@@ -94,10 +107,19 @@ def retire_instance(
             instance=instance,
             dry_run=dry_run,
         )
+        if snapshotted:
+            if dry_run:
+                LOG.info(
+                    "Would shelve instance %s %s %s",
+                    instance.name,
+                    instance.id,
+                    instance.status,
+                )
+            else:
+                LOG.info("Shelving instance %s %s", instance.name, instance.status)
+                # connection.compute.shelve_server(instance)
 
-    if snapshotted:
-        LOG.info("Shelving instance %s %s", instance.name, instance.status)
-        # TODO shelve the instance
+    return instance
 
 
 def parse_args() -> argparse.Namespace:
@@ -111,6 +133,11 @@ def parse_args() -> argparse.Namespace:
         "--dry-run",
         action="store_true",
     )
+    parser.add_argument(
+        "--parallel",
+        type=int,
+        default=5,
+    )
     return parser.parse_args()
 
 
@@ -123,23 +150,33 @@ def main() -> None:
 
     instances_to_retire = get_instances_to_retire(conn)
 
-    for i in instances_to_retire:
-        retire_instance(
-            connection=conn,
-            instance=i,
-            dry_run=args.dry_run,
-        )
-
-    # future_to_retired_instance = {}
-    # with ThreadPoolExecutor(max_workers=args.parallel) as executor:
-    #     for instance in instances_to_retire:
-    #         shelving_future = executor.submit(
-    #             retire_instance,
-    #             connection=conn,
-    #             instance=instance,
-    #             dry_run=args.dry_run,
-    #         )
-    #         future_to_retired_instance[shelving_future] = instance
+    with ThreadPoolExecutor(max_workers=args.parallel) as executor:
+        future_to_retired_instance = {
+            executor.submit(
+                retire_instance,
+                connection=conn,
+                instance=instance,
+                dry_run=args.dry_run,
+            ): instance
+            for instance in instances_to_retire
+        }
+        for future in as_completed(future_to_retired_instance):
+            instance = future_to_retired_instance[future]
+            try:
+                retired_instance = future.result()
+                LOG.info(
+                    "Finished! instance %s %s %s",
+                    retired_instance.name,
+                    retired_instance.id,
+                    retired_instance.status,
+                )
+            except Exception as exc:
+                LOG.error(
+                    "Error retiring instance %s %s: %s",
+                    instance.name,
+                    instance.id,
+                    exc,
+                )
 
 
 if __name__ == "__main__":
