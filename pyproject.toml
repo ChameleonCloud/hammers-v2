@@ -18,6 +18,7 @@ classifiers = [
 ]
 
 dependencies = [
+  "reference_transmogrifier @ git+https://github.com/ChameleonCloud/doni-referenceapi",
   "openstacksdk @ git+https://github.com/ChameleonCloud/openstacksdk@chameleoncloud/blazar",
   "oslo.config",
   "oslo.service",
@@ -45,3 +46,4 @@ floating_ip_reaper = "hammers.ip_cleaner:launch_main"
 expired_project_reaper = "hammers.expired_project_cleaner:launch_main"
 image_deployer = "hammers.image_deployer:launch_main"
 set_image_property = "hammers.set_image_property:launch_main"
+generate_reference_repo = "reference_transmogrifier.main:main"
