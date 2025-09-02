@@ -45,7 +45,7 @@ def get_instances_to_retire(connection: Connection) -> Generator[Server]:
 def ensure_instance_is_snapshotted(
     connection: Connection,
     instance: Server,
-    dry_run: bool,
+    i_really_mean_it: bool,
 ) -> None:
     snapshot_name = f"{instance.id}-snapshot"
 
@@ -69,9 +69,7 @@ def ensure_instance_is_snapshotted(
         )
         return snap
 
-    if dry_run:
-        LOG.info("Would snapshot instance %s %s", instance.name, instance.id)
-    else:
+    if i_really_mean_it:
         LOG.info("snapshotting instance %s %s", instance.name, instance.status)
         snapshot_image = connection.create_image_snapshot(
             name=snapshot_name,
@@ -80,12 +78,14 @@ def ensure_instance_is_snapshotted(
         )
         connection.image.update_image(snapshot_image, owner=instance.project_id)
         return snapshot_image
+    else:
+        LOG.info("Would snapshot instance %s %s", instance.name, instance.id)
 
 
 def retire_instance(
     connection: Connection,
     instance: Server,
-    dry_run: bool,
+    i_really_mean_it: bool,
 ) -> Server:
     """Retire non-reservable instances by shelving them.
 
@@ -95,29 +95,31 @@ def retire_instance(
     4. shelve the instance (must wait for snapshot to complete)
     """
 
-    # LOG.info("Locking instance %s %s", instance.name, instance.status)
-
-    # if instance.status in ["ACTIVE"]:
-    #    LOG.info("Shutting down instance %s %s", instance.name, instance.status)
+    if instance.status in ["ACTIVE"]:
+        if i_really_mean_it:
+            LOG.info("Shutting down instance %s %s", instance.name, instance.status)
+            connection.compute.stop_server(instance)
+        else:
+            LOG.info("Would shut down instance %s %s", instance.name, instance.status)
 
     snapshotted = False
     if instance.status in ["SHUTOFF"]:
         snapshotted = ensure_instance_is_snapshotted(
             connection=connection,
             instance=instance,
-            dry_run=dry_run,
+            i_really_mean_it=i_really_mean_it,
         )
         if snapshotted:
-            if dry_run:
+            if i_really_mean_it:
+                LOG.info("Shelving instance %s %s", instance.name, instance.status)
+                connection.compute.shelve_server(instance)
+            else:
                 LOG.info(
                     "Would shelve instance %s %s %s",
                     instance.name,
                     instance.id,
                     instance.status,
                 )
-            else:
-                LOG.info("Shelving instance %s %s", instance.name, instance.status)
-                # connection.compute.shelve_server(instance)
 
     return instance
 
@@ -130,7 +132,7 @@ def parse_args() -> argparse.Namespace:
         help="item in clouds.yaml to connect to, same as OS_CLOUD",
     )
     parser.add_argument(
-        "--dry-run",
+        "--i-really-mean-it",
         action="store_true",
     )
     parser.add_argument(
@@ -156,7 +158,7 @@ def main() -> None:
                 retire_instance,
                 connection=conn,
                 instance=instance,
-                dry_run=args.dry_run,
+                i_really_mean_it=args.i_really_mean_it,
             ): instance
             for instance in instances_to_retire
         }
