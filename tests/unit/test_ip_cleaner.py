@@ -7,7 +7,7 @@ from openstack.network.v2.floating_ip import FloatingIP
 from openstack.network.v2.port import Port
 from openstack.network.v2.router import Router
 
-from hammers import ip_cleaner
+from hammers import network_ip_cleaner
 
 TIME_NOW = "2024-10-30T12:13:14Z"
 
@@ -17,7 +17,7 @@ FAKE_GRACE_PERIOD = TimeDelta(days=9999)
 
 def test_parse_args_default():
     args = ["--cloud", "foo"]
-    result = ip_cleaner.parse_args(args)
+    result = network_ip_cleaner.parse_args(args)
     assert result.cloud == "foo"
     assert result.grace_days == 7
     assert not result.dry_run
@@ -25,13 +25,13 @@ def test_parse_args_default():
 
 def test_parse_args_dry_run():
     args = ["--cloud", "foo", "--dry-run"]
-    result = ip_cleaner.parse_args(args)
+    result = network_ip_cleaner.parse_args(args)
     assert result.dry_run
 
 
 def test_parse_args_grace_days():
     args = ["--cloud", "foo", "--grace-days", "27"]
-    result = ip_cleaner.parse_args(args)
+    result = network_ip_cleaner.parse_args(args)
     assert result.grace_days == 27
 
 
@@ -41,17 +41,17 @@ def test_grace_period_expired():
     TIME_OLD = "2023-10-30T12:13:14Z"
     GRACE_PERIOD_SHORT = TimeDelta(days=1)  # TIME_RECENT should expire
     GRACE_PERIOD_LONG = TimeDelta(days=7)  # TIME_RECENT should not expire
-    assert ip_cleaner.grace_period_expired(TIME_RECENT, GRACE_PERIOD_SHORT)
-    assert not ip_cleaner.grace_period_expired(TIME_RECENT, GRACE_PERIOD_LONG)
-    assert ip_cleaner.grace_period_expired(TIME_OLD, GRACE_PERIOD_SHORT)
-    assert ip_cleaner.grace_period_expired(TIME_OLD, GRACE_PERIOD_LONG)
+    assert network_ip_cleaner.grace_period_expired(TIME_RECENT, GRACE_PERIOD_SHORT)
+    assert not network_ip_cleaner.grace_period_expired(TIME_RECENT, GRACE_PERIOD_LONG)
+    assert network_ip_cleaner.grace_period_expired(TIME_OLD, GRACE_PERIOD_SHORT)
+    assert network_ip_cleaner.grace_period_expired(TIME_OLD, GRACE_PERIOD_LONG)
 
 
 class TestFindFLoatingIPs:
     conn = mock.patch("openstack.connection.Connection")
     conn.list_floating_ips = mock.MagicMock()
 
-    @mock.patch.object(ip_cleaner, "grace_period_expired")
+    @mock.patch.object(network_ip_cleaner, "grace_period_expired")
     @pytest.mark.parametrize(
         "fip_addr,fixed_addr,status,is_grace_exp,tag,should_delete",
         [
@@ -85,7 +85,7 @@ class TestFindFLoatingIPs:
         )
         self.conn.list_floating_ips.return_value = [FIP]
 
-        result = list(ip_cleaner.find_idle_floating_ips(self.conn, FAKE_GRACE_PERIOD))
+        result = list(network_ip_cleaner.find_idle_floating_ips(self.conn, FAKE_GRACE_PERIOD))
 
         if should_delete:
             assert result == [FIP]
@@ -98,7 +98,7 @@ class TestCleanRouters:
     conn.list_routers = mock.MagicMock()
     conn.list_router_interfaces = mock.MagicMock()
 
-    @mock.patch.object(ip_cleaner, "grace_period_expired")
+    @mock.patch.object(network_ip_cleaner, "grace_period_expired")
     @pytest.mark.parametrize(
         "is_grace_exp,should_delete",
         [
@@ -118,7 +118,7 @@ class TestCleanRouters:
         self.conn.list_routers.return_value = [FAKE_ROUTER]
         self.conn.list_router_interfaces.return_value = []
         routers_to_delete = list(
-            ip_cleaner.find_idle_routers(self.conn, grace_period=FAKE_GRACE_PERIOD)
+            network_ip_cleaner.find_idle_routers(self.conn, grace_period=FAKE_GRACE_PERIOD)
         )
 
         if should_delete:
@@ -126,7 +126,7 @@ class TestCleanRouters:
         else:
             assert routers_to_delete == []
 
-    @mock.patch.object(ip_cleaner, "grace_period_expired")
+    @mock.patch.object(network_ip_cleaner, "grace_period_expired")
     def test_with_interfaces(self, mock_grace_period_expired: mock.MagicMock):
         mock_grace_period_expired.return_value = True
 
@@ -140,12 +140,12 @@ class TestCleanRouters:
         self.conn.list_router_interfaces.return_value = [FAKE_INTERFACE]
 
         routers_to_delete = list(
-            ip_cleaner.find_idle_routers(self.conn, grace_period=FAKE_GRACE_PERIOD)
+            network_ip_cleaner.find_idle_routers(self.conn, grace_period=FAKE_GRACE_PERIOD)
         )
 
         assert routers_to_delete == []
 
-    @mock.patch.object(ip_cleaner, "grace_period_expired")
+    @mock.patch.object(network_ip_cleaner, "grace_period_expired")
     def test_has_blazar_ip(self, mock_grace_period_expired: mock.MagicMock):
         mock_grace_period_expired.return_value = True
 
@@ -165,7 +165,7 @@ class TestCleanRouters:
         )
         self.conn.list_routers.return_value = [FAKE_ROUTER]
         routers_to_delete = list(
-            ip_cleaner.find_idle_routers(
+            network_ip_cleaner.find_idle_routers(
                 self.conn,
                 grace_period=FAKE_GRACE_PERIOD,
                 ip_whitelist={"fake-not-reservable-ip-address"},
@@ -174,7 +174,7 @@ class TestCleanRouters:
         assert routers_to_delete == [FAKE_ROUTER]
 
         routers_to_delete = list(
-            ip_cleaner.find_idle_routers(
+            network_ip_cleaner.find_idle_routers(
                 self.conn,
                 grace_period=FAKE_GRACE_PERIOD,
                 ip_whitelist={"fake-reservable-ip-address"},
