@@ -23,6 +23,8 @@ dependencies = [
   "oslo.service",
   "oslo.log",
   "iso8601",
+  "pyyaml",
+  "kubernetes",
 ]
 
 
@@ -40,3 +42,6 @@ dev = [
 periodic_inspector = "hammers.periodic_node_inspector:main"
 floating_ip_network_reaper = "hammers.network_ip_cleaner:launch_main"
 expired_project_reaper = "hammers.expired_project_cleaner:launch_main"
+image_deployer = "hammers.image_deployer:launch_main"
+set_image_property = "hammers.set_image_property:launch_main"
+cleanup_jupyter_volumes = "hammers.cleanup_jupyter_volumes:launch_main"
