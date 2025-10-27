@@ -59,7 +59,11 @@ def find_idle_networks(conn: Connection, grace_period) -> Generator[Network]:
         safe_to_delete = True
         reasons = []
 
-        if not grace_period_expired(network.updated_at, grace_period):
+        if network.updated_at is None:
+            safe_to_delete=False
+            reasons.append("No updated at!")
+            LOG.warning("Network %s is missing updated_at field, skipping.", network.id)
+        elif not grace_period_expired(network.updated_at, grace_period):
             safe_to_delete = False
             reasons.append("grace period")
 
