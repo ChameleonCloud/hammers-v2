@@ -23,6 +23,7 @@ dependencies = [
   "oslo.service",
   "oslo.log",
   "iso8601",
+  "aiohttp"
 ]
 
 
@@ -40,3 +41,4 @@ dev = [
 periodic_inspector = "hammers.periodic_node_inspector:main"
 floating_ip_network_reaper = "hammers.network_ip_cleaner:launch_main"
 expired_project_reaper = "hammers.expired_project_cleaner:launch_main"
+audit_expired_projects = "hammers.project_auditor:main"
