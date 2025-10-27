@@ -4,12 +4,15 @@ import argparse
 import logging
 import sys
 from collections.abc import Generator
+from collections import defaultdict
 from datetime import timedelta as TimeDelta
 
 import openstack
 from openstack.connection import Connection
 from openstack.network.v2.floating_ip import FloatingIP
 from openstack.network.v2.router import Router
+from openstack.network.v2.network import Network
+from openstack.network.v2.port import Port
 
 from hammers.utils import grace_period_expired
 
@@ -20,6 +23,70 @@ logging.basicConfig(
 )
 openstack.enable_logging(debug=False)
 LOG = logging.getLogger(__name__)
+
+
+def _is_dhcp_port(port: Port) -> bool:
+    """Check if port is a DHCP port"""
+    return port.device_owner == "network:dhcp"
+
+
+def _is_router_port(port: Port) -> bool:
+    """Check if port is a router interface or gateway"""
+    return port.device_owner in [
+        "network:router_interface",
+        "network:router_gateway",
+        "network:router_interface_distributed",
+        "network:ha_router_replicated_interface",
+    ]
+
+
+def find_idle_networks(conn: Connection, grace_period) -> Generator[Network]:
+    """Find idle networks that are safe to delete."""
+
+    ports = conn.list_ports()
+    ports_by_network_id = defaultdict(list)
+    for p in ports:
+        ports_by_network_id[p.network_id].append(p)
+
+    networks = conn.list_networks(
+        filters={
+            "is_router_external": False,
+            "is_shared": False,
+        }
+    )
+
+    for network in networks:
+        safe_to_delete = True
+        reasons = []
+
+        if not grace_period_expired(network.updated_at, grace_period):
+            safe_to_delete = False
+            reasons.append("grace period")
+
+        network_ports = ports_by_network_id.get(network.id, [])
+        dhcp_ports = []
+        router_ports = []
+        other_ports = []
+        for p in network_ports:
+            if _is_dhcp_port(p):
+                dhcp_ports.append(p)
+            elif _is_router_port(p):
+                router_ports.append(p)
+            else:
+                other_ports.append(p)
+
+        if len(router_ports):
+            safe_to_delete = False
+            reasons.append("has router port(s)")
+        if len(other_ports):
+            safe_to_delete = False
+            reasons.append("has other port(s)")
+
+        if safe_to_delete:
+            LOG.debug("Would delete %s", network.name)
+            yield network
+        else:
+            LOG.debug("Not deleting network %s for reasons %s", network.name, reasons)
 
 
 def find_idle_floating_ips(conn: Connection, grace_period) -> Generator[FloatingIP]:
@@ -110,29 +177,45 @@ def main(arg_list: list[str]) -> None:
 
     conn = openstack.connect(cloud=args.cloud)
 
-    fips = find_idle_floating_ips(conn=conn, grace_period=grace_period)
-    for f in fips:
-        if args.dry_run:
-            LOG.info("DRY-RUN: remove floating IP %s:%s", f.id, f.floating_ip_address)
-
-        if not args.dry_run:
-            LOG.info("deleting unused floating IP %s:%s", f.id, f.floating_ip_address)
-            conn.delete_floating_ip(f.id)
+    networks = list(find_idle_networks(conn=conn, grace_period=grace_period))
+    fips = list(find_idle_floating_ips(conn=conn, grace_period=grace_period))
 
     try:
         reservable_ips = {r.floating_ip_address for r in conn.reservation.floatingips()}
     except Exception as ex:
         print("couldn't check reservable FIPs:", ex)
-        reservable_ips = []
-    
-    routers = find_idle_routers(
-        conn=conn, grace_period=grace_period, ip_whitelist=reservable_ips
+        reservable_ips = set()
+    routers = list(
+        find_idle_routers(
+            conn=conn, grace_period=grace_period, ip_whitelist=reservable_ips
+        )
     )
+
+    LOG.info(
+        "Found %s networks, %s fips, and %s routers to clean up",
+        len(networks),
+        len(fips),
+        len(routers),
+    )
+
+    for n in networks:
+        if args.dry_run:
+            LOG.info("DRY-RUN: remove network %s:%s", n.id, n.name)
+        else:
+            LOG.info("deleting unused network %s:%s", n.id, n.name)
+            conn.delete_network(n.id)
+
+    for f in fips:
+        if args.dry_run:
+            LOG.info("DRY-RUN: remove floating IP %s:%s", f.id, f.floating_ip_address)
+        else:
+            LOG.info("deleting unused floating IP %s:%s", f.id, f.floating_ip_address)
+            conn.delete_floating_ip(f.id)
+
     for r in routers:
         if args.dry_run:
             LOG.info("DRY-RUN: remove router %s:%s", r.id, r.name)
-
-        if not args.dry_run:
+        else:
             LOG.info("deleting unused router %s:%s", r.id, r.name)
             conn.delete_router(r.id)
 
