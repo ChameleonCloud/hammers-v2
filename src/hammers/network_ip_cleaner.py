@@ -168,6 +168,21 @@ def parse_args(args: list[str]) -> argparse.Namespace:
         default=7,
         help="How many days does a resource need to be unused before we'll clean it up",
     )
+    parser.add_argument(
+        "--clean-networks",
+        action="store_true",
+        help="Should network objects be acted on.",
+    )
+    parser.add_argument(
+        "--clean-floatingips",
+        action="store_true",
+        help="Should floating ips objects be acted on.",
+    )
+    parser.add_argument(
+        "--clean-routers",
+        action="store_true",
+        help="Should router objects be acted on.",
+    )
     return parser.parse_args(args)
 
 
@@ -202,26 +217,29 @@ def main(arg_list: list[str]) -> None:
         len(routers),
     )
 
-    for n in networks:
-        if args.dry_run:
-            LOG.info("DRY-RUN: remove network %s:%s", n.id, n.name)
-        else:
-            LOG.info("deleting unused network %s:%s", n.id, n.name)
-            conn.delete_network(n.id)
+    if args.clean_networks:
+        for n in networks:
+            if args.dry_run:
+                LOG.info("DRY-RUN: remove network %s:%s", n.id, n.name)
+            else:
+                LOG.info("deleting unused network %s:%s", n.id, n.name)
+                conn.delete_network(n.id)
 
-    for f in fips:
-        if args.dry_run:
-            LOG.info("DRY-RUN: remove floating IP %s:%s", f.id, f.floating_ip_address)
-        else:
-            LOG.info("deleting unused floating IP %s:%s", f.id, f.floating_ip_address)
-            conn.delete_floating_ip(f.id)
+    if args.clean_floatingips:
+        for f in fips:
+            if args.dry_run:
+                LOG.info("DRY-RUN: remove floating IP %s:%s", f.id, f.floating_ip_address)
+            else:
+                LOG.info("deleting unused floating IP %s:%s", f.id, f.floating_ip_address)
+                conn.delete_floating_ip(f.id)
 
-    for r in routers:
-        if args.dry_run:
-            LOG.info("DRY-RUN: remove router %s:%s", r.id, r.name)
-        else:
-            LOG.info("deleting unused router %s:%s", r.id, r.name)
-            conn.delete_router(r.id)
+    if args.clean_routers:
+        for r in routers:
+            if args.dry_run:
+                LOG.info("DRY-RUN: remove router %s:%s", r.id, r.name)
+            else:
+                LOG.info("deleting unused router %s:%s", r.id, r.name)
+                conn.delete_router(r.id)
 
 
 def launch_main():
