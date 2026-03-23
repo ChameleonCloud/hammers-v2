@@ -88,7 +88,7 @@ def get_host():
         blazar_config.read('/etc/blazar/blazar.conf')
         email_host = blazar_config['physical:host']['email_relay']
     except Exception:
-        logging.warn(
+        logging.warning(
             'Cannot read email relay from config file. '
             'Defaul email host will be useed')
         email_host = DEFAULT_EMAIL_HOST
