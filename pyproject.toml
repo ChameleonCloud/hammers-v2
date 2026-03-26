@@ -26,6 +26,8 @@ dependencies = [
   "iso8601",
   "pyyaml",
   "tqdm",
+  "jinja2",
+  "requests",
 ]
 
 
@@ -48,3 +50,4 @@ image_deployer = "hammers.image_deployer:launch_main"
 set_image_property = "hammers.set_image_property:launch_main"
 generate_reference_repo = "reference_transmogrifier.main:main"
 instance_shelver = "hammers.instance_shelver:main"
+idle_lease_reaper = "hammers.idle_lease_reaper:launch_main"
