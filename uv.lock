@@ -2021,7 +2021,7 @@ wheels = [
 [[package]]
 name = "reference-transmogrifier"
 version = "0.0.0"
-source = { git = "https://github.com/ChameleonCloud/doni-referenceapi#458224c97f53b0429ae5e7643ca8625ace1793d6" }
+source = { git = "https://github.com/ChameleonCloud/doni-referenceapi#817de20522db55a573d23b87bac146e399628fe2" }
 dependencies = [
     { name = "gitpython" },
     { name = "openstacksdk" },
