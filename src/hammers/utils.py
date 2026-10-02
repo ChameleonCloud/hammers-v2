@@ -127,6 +127,7 @@ def unreserved_blazar_hosts(connection: Connection) -> Generator[BlazarHost]:
                     print(
                         f"Skipping {alloc.resource_id}: next reservation starts in {time_to_res}"
                     )
+                    continue
 
         yield res_proxy.get_host(alloc.resource_id)
 
