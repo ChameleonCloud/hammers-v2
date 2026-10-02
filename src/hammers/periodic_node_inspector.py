@@ -34,6 +34,10 @@ def get_nodes_to_inspect(
     """Queue a node for inspection, and handle interruptions."""
     inspection_timedelta = timedelta(days=expire_days)
 
+    inspectable_provision_states = list(utils.INSPECTABLE_PROVISION_STATES)
+    if reinspect_failed:
+        inspectable_provision_states.append("inspect failed")
+
     for node in nodes:
         ### Readonly checks
         if node.needs_bootmode_set():
@@ -57,10 +61,6 @@ def get_nodes_to_inspect(
                 LOG.warning(
                     "Please run provide for node: node %s:%s", node.uuid, node.name
                 )
-
-        inspectable_provision_states = utils.INSPECTABLE_PROVISION_STATES
-        if reinspect_failed:
-            inspectable_provision_states.append("inspect failed")
 
         ### Check if safe to modify
         if (
