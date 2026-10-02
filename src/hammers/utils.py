@@ -65,10 +65,8 @@ class ReservableNode(IronicNode):
             # inspected, or most recent inspection failed to complete
             return True
 
-        last_inspected_date = datetime.datetime.fromisoformat(
-            self.inspection_finished_at,
-        )
-        now = datetime.datetime.now(tz=datetime.UTC)
+        last_inspected_date = iso8601.parse_date(self.inspection_finished_at)
+        now = DateTime.now(tz=TimeZone.utc)
         return (now - last_inspected_date) > inspection_interval
 
     def needs_bootmode_set(self) -> bool:
@@ -104,7 +102,7 @@ def unreserved_blazar_hosts(connection: Connection) -> Generator[BlazarHost]:
     res_proxy = connection.reservation
 
     allocations = res_proxy.host_allocations()
-    now = datetime.datetime.now(tz=datetime.UTC)
+    now = DateTime.now(tz=TimeZone.utc)
     for alloc in allocations:
         in_reservation = False
         reservations = alloc.reservations
