@@ -7,12 +7,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 WORKDIR /opt/hammers
 COPY . /opt/hammers
 
-RUN pip install .
+RUN pip install --no-cache-dir .
 
 VOLUME /etc/hammers
 VOLUME /var/log
