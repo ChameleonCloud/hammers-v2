@@ -21,6 +21,7 @@ As for deployment, the plan is to run this in parallel with hammers v1, and incr
 - [Image Deployer](docs/image_deployer.md)
 - [Set Image Property](docs/set_image_property.md)
 - [Serial Console Enabler](docs/serial_console_enabler.md)
+- [Stuck Node Detector](docs/stuck_node_detector.md): read-only, reports stuck Ironic nodes as Prometheus metrics
 
 # Running Hammers
 
