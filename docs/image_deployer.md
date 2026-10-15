@@ -14,6 +14,9 @@ image_prefix: testing_
 scope: prod
 image_store_cloud: uc_dev
 object_store_url: https://chi.uc.chameleoncloud.org:7480/swift/v1/{the account with the image container, e.g. AUTH_id}
+images:
+  - CC-Ubuntu24.04
+  - CC-Ubuntu24.04-CUDA
 ```
 
 The image container for production images is stored in a central
@@ -34,6 +37,11 @@ The `image_store_cloud` is the location of the site with Glance
 where the images should be pushed to. This should contain the
 credentials for your cloud in a `clouds.yaml` file for the
 OpenStack client.
+
+Set `images` to the images a site should deploy. Leave it unset to
+deploy every available image. If `images` is set, any existing image at the
+site that is not in the list will be archived (and no new version of that
+image deployed unless added to this list).
 
 After installing the dependencies, you can run the tool as follows:
 ```

@@ -331,6 +331,35 @@ def promote_image(image_connection,
         logging.error(error)
 
 
+def archive_unwanted_images(image_connection,
+                            image_names,
+                            image_metadata_field,
+                            dry_run):
+    for image_name in image_names:
+        existing_images = list(
+            image_connection.image.images(
+                name=image_name,
+                visibility="public"
+            )
+        )
+        if len(existing_images) == 1:
+            if dry_run:
+                logging.info(f"DRY RUN: Archiving unwanted image {image_name}.")
+            else:
+                logging.info(f"Archiving unwanted image {image_name}.")
+                try:
+                    archive_image(image_connection,
+                                  existing_images[0],
+                                  image_metadata_field=image_metadata_field)
+                except Exception as e:
+                    logging.error(f"Error archiving image {image_name}: {e}. "
+                                  "Manual intervention required.")
+        elif len(existing_images) > 1:
+            logging.warning(f"Multiple images found with name {image_name}. "
+                            "Aborting archive of this image. "
+                            "Manual intervention required.")
+
+
 def get_manifest_data(manifest_url):
     response = requests.get(manifest_url)
     if response.status_code != 200:
@@ -488,8 +517,25 @@ def main(arg_list: list[str]) -> None:
     current_values = get_current_value(storage_url, base_container, scope)
     logging.debug(f"Using latest image release: {current_values}")
 
-    # TODO(pdmars): first pass we assume we will release all images, add filters
-    # for different sites later that may not need all images
+    wanted_images = site.get("images")
+    if wanted_images is not None:
+        unknown_images = [i for i in wanted_images if i not in current_values]
+        if unknown_images:
+            logging.error("Unknown images in your site.yaml config: "
+                          f"{unknown_images}. Choose from: "
+                          f"{list(current_values)}. "
+                          "Not archiving any images.")
+        else:
+            archive_unwanted_images(
+                image_connection,
+                [i for i in current_values if i not in wanted_images],
+                image_metadata_field,
+                args.dry_run,
+            )
+        current_values = {
+            i: current_values[i] for i in wanted_images if i in current_values
+        }
+
     available_images = get_available_images(storage_url,
                                             base_container,
                                             scope,

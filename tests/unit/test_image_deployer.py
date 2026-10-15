@@ -2,6 +2,7 @@ import datetime
 import json
 import pytest
 import requests
+import yaml
 
 
 from unittest import mock
@@ -272,3 +273,48 @@ def test_get_image_build_timestamp(properties, expected_type, raises, caplog):
         assert any("Unable to find build-timestamp" in message for message in caplog.text.splitlines())
     else:
         assert "Unable to find build-timestamp" not in caplog.text
+
+
+def run_main(tmp_path, monkeypatch, images):
+    site_yaml = tmp_path / "site.yaml"
+    site_yaml.write_text(yaml.safe_dump({
+        "image_store_cloud": "envvars",
+        "object_store_url": "http://image/store",
+        "images": images,
+    }))
+    site_images = []
+    for name, image_id in [("CC-Ubuntu24.04", "ubuntu-id"),
+                           ("CC-CentOS9-Stream", "centos-id")]:
+        image = mock.Mock(id=image_id,
+                          properties={"build-timestamp": "2024-04-27 15:30:45.123456"})
+        image.name = name
+        site_images.append(image)
+    conn = mock.Mock()
+    conn.image.images.side_effect = lambda name=None, visibility=None: [
+        i for i in site_images if name in (None, i.name)
+    ]
+    do_sync = mock.Mock()
+    monkeypatch.setattr(image_deployer, "get_openstack_connection", lambda cloud: conn)
+    monkeypatch.setattr(image_deployer, "get_current_value", lambda *args: {
+        "CC-Ubuntu24.04": "20250422-v1-amd",
+        "CC-CentOS9-Stream": "20250422-v1-centos",
+    })
+    monkeypatch.setattr(image_deployer, "get_available_images", mock.Mock(return_value=[]))
+    monkeypatch.setattr(image_deployer, "do_sync", do_sync)
+
+    image_deployer.main(["--site-yaml", str(site_yaml)])
+    return conn, do_sync
+
+
+def test_main_archives_unlisted_images_and_syncs_listed(tmp_path, monkeypatch):
+    conn, do_sync = run_main(tmp_path, monkeypatch, ["CC-Ubuntu24.04"])
+
+    conn.image.update_image.assert_called_once_with("centos-id", name=mock.ANY)
+    assert do_sync.call_args.kwargs["current_values"] == {"CC-Ubuntu24.04": "20250422-v1-amd"}
+
+
+def test_main_unknown_image_archives_nothing_and_syncs_listed(tmp_path, monkeypatch):
+    conn, do_sync = run_main(tmp_path, monkeypatch, ["CC-Ubuntu24.04", "CC-Ubuntu24.4"])
+
+    conn.image.update_image.assert_not_called()
+    assert do_sync.call_args.kwargs["current_values"] == {"CC-Ubuntu24.04": "20250422-v1-amd"}
