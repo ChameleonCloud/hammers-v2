@@ -35,6 +35,8 @@ class Condition(NamedTuple):
     node_uuid: str
     node_name: str
     provision_state: str
+    # the server nova returns 404 for; empty for conditions that aren't about an instance
+    instance_uuid: str = ""
 
 
 def find_orphans(conn: Connection) -> list[Node]:
@@ -58,7 +60,7 @@ def find_orphans(conn: Connection) -> list[Node]:
 
 def check_orphaned_instance(conn: Connection) -> list[Condition]:
     return [
-        Condition("orphaned_instance", n.id, n.name or "", n.provision_state)
+        Condition("orphaned_instance", n.id, n.name or "", n.provision_state, n.instance_id)
         for n in find_orphans(conn)
     ]
 
@@ -101,7 +103,7 @@ class NodeConditionCollector(Collector):
         condition = GaugeMetricFamily(
             "chameleon_node_condition",
             "Node is in a bad condition, named by the condition label.",
-            labels=["check", "condition", "node_uuid", "node_name", "provision_state"],
+            labels=["check", "condition", "node_uuid", "node_name", "provision_state", "instance_uuid"],
         )
         last_success = GaugeMetricFamily(
             "chameleon_node_check_last_success_timestamp_seconds",

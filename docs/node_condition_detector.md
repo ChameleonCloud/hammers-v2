@@ -8,7 +8,7 @@ It runs every check every `--interval` seconds and serves the latest results on 
 
 | check | condition | means | runbook |
 |---|---|---|---|
-| `orphaned_instance` | `orphaned_instance` | The node has an `instance_uuid`, and nova returns 404 for that server. Nova has lost the server but ironic still holds the node, so it can't be scheduled. See nova bugs [2169776](https://bugs.launchpad.net/nova/+bug/2169776), [2169779](https://bugs.launchpad.net/nova/+bug/2169779), [2169200](https://bugs.launchpad.net/nova/+bug/2169200). | [IronicNodeOrphanInstance](https://github.com/ChameleonCloud/chi-in-a-box/blob/chameleoncloud/2025.1/docs/runbooks/IronicNodeOrphanInstance.md) |
+| `orphaned_instance` | `orphaned_instance` | The node has an `instance_uuid`, and nova returns 404 for that server. Nova has lost the server but ironic still holds the node, so it can't be scheduled. `instance_uuid` is the missing server. See nova bugs [2169776](https://bugs.launchpad.net/nova/+bug/2169776), [2169779](https://bugs.launchpad.net/nova/+bug/2169779), [2169200](https://bugs.launchpad.net/nova/+bug/2169200). | [IronicNodeOrphanInstance](https://github.com/ChameleonCloud/chi-in-a-box/blob/chameleoncloud/2025.1/docs/runbooks/IronicNodeOrphanInstance.md) |
 
 To add a check, write a function that returns its `Condition`s and add it to `CHECKS`.
 
@@ -17,7 +17,7 @@ Nodes in failed or stuck provision states (`deploy failed`, `error`, `wait call-
 ## Metrics
 
 ```
-chameleon_node_condition{check, condition, node_uuid, node_name, provision_state} 1
+chameleon_node_condition{check, condition, node_uuid, node_name, provision_state, instance_uuid} 1
 chameleon_node_check_last_success_timestamp_seconds{check}
 ```
 
@@ -49,7 +49,7 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "{{ $labels.node_name }} at {{ $labels.kolla_external_fqdn }}: {{ $labels.condition }} ({{ $labels.provision_state }})"
+          summary: "{{ $labels.node_name }} at {{ $labels.kolla_external_fqdn }}: {{ $labels.condition }} ({{ $labels.provision_state }}){{ with $labels.instance_uuid }}, instance {{ . }}{{ end }}"
           # one runbook per condition, listed in the Checks table
           runbook_url: "https://github.com/ChameleonCloud/hammers-v2/blob/main/docs/node_condition_detector.md#checks"
       - alert: NodeCheckStale
