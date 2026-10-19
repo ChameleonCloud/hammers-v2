@@ -121,6 +121,7 @@ class NodeConditionCollector(Collector):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cloud", help="item in clouds.yaml to connect to, same as OS_CLOUD")
+    parser.add_argument("--addr", default="0.0.0.0", help="address to serve /metrics on (default 0.0.0.0, every interface)")
     parser.add_argument("--port", type=int, default=9199, help="port to serve /metrics on (default 9199)")
     parser.add_argument("--interval", type=int, default=600, help="seconds between check runs (default 600)")
     parser.add_argument("--once", action="store_true", help="run the checks once, print the metrics and exit; exits 1 if a check failed")
@@ -141,8 +142,8 @@ def main() -> None:
 
     registry = CollectorRegistry()
     registry.register(collector)
-    start_http_server(args.port, registry=registry)
-    LOG.info("serving /metrics on port %d, running checks every %ds", args.port, args.interval)
+    start_http_server(args.port, addr=args.addr, registry=registry)
+    LOG.info("serving /metrics on %s:%d, running checks every %ds", args.addr, args.port, args.interval)
     while True:
         collector.run(conn)
         time.sleep(args.interval)

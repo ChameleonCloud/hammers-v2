@@ -1,5 +1,7 @@
 from unittest import mock
 
+import pytest
+
 from openstack import exceptions
 from openstack.baremetal.v1.node import Node
 from openstack.compute.v2.server import Server
@@ -92,3 +94,19 @@ def test_check_that_never_succeeded_reports_last_success_0():
 
     registry = scrape(collector)
     assert registry.get_sample_value("chameleon_node_check_last_success_timestamp_seconds", {"check": "broken"}) == 0
+
+
+def test_serves_metrics_only_on_the_given_address(monkeypatch):
+    # on a control node, --addr keeps /metrics off the public interface
+    monkeypatch.setattr("sys.argv", ["node_condition_detector", "--addr", "10.0.0.5", "--port", "9199"])
+    with (
+        mock.patch("openstack.connect"),
+        mock.patch("hammers.node_condition_detector.start_http_server") as serve,
+        mock.patch("time.sleep", side_effect=SystemExit),  # stop after the first run
+        pytest.raises(SystemExit),
+    ):
+        node_condition_detector.main()
+
+    serve.assert_called_once()
+    assert serve.call_args.args == (9199,)
+    assert serve.call_args.kwargs["addr"] == "10.0.0.5"
