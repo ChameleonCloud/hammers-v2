@@ -57,7 +57,7 @@ def test_serves_each_checks_conditions_and_success_time():
         collector.run(fake_conn(get_server=exceptions.NotFoundException()))
 
     registry = scrape(collector)
-    orphan = Condition("orphaned_instance", "n-orphan", "orphan", "active")
+    orphan = Condition("orphaned_instance", "n-orphan", "orphan", "active", instance_uuid="srv-gone")
     assert registry.get_sample_value(
         "chameleon_node_condition", condition_labels("orphaned_instance", orphan)
     ) == 1
