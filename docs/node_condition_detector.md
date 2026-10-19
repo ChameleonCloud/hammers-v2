@@ -2,7 +2,7 @@
 
 A Prometheus exporter that reports ironic nodes in a bad condition. Read-only: it never changes a node.
 
-It runs every check every `--interval` seconds and serves the latest results on `:<port>/metrics`. Prometheus scrapes it as job `node_condition`.
+It runs every check every `--interval` seconds and serves the latest results on `<addr>:<port>/metrics`. Prometheus scrapes it as job `node_condition`.
 
 ## Checks
 
@@ -26,6 +26,7 @@ If a check fails, it keeps serving its last results, and its last-success time g
 ## Arguments
 
 - `--cloud`: entry in clouds.yaml to use, same as `OS_CLOUD`
+- `--addr`: address to serve `/metrics` on (default `0.0.0.0`, every interface). Use the internal API address on a host with a public interface.
 - `--port`: port to serve `/metrics` on (default 9199)
 - `--interval`: seconds between check runs (default 600)
 - `--once`: run the checks once, print the metrics and exit; exits 1 if a check failed
