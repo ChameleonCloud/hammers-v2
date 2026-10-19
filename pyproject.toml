@@ -28,6 +28,7 @@ dependencies = [
   "tqdm",
   "jinja2",
   "requests",
+  "prometheus-client",
 ]
 
 
@@ -52,3 +53,4 @@ generate_reference_repo = "reference_transmogrifier.main:main"
 instance_shelver = "hammers.instance_shelver:main"
 idle_lease_reaper = "hammers.idle_lease_reaper:launch_main"
 serial_console_enabler = "hammers.serial_console_enabler:launch_main"
+node_condition_detector = "hammers.node_condition_detector:main"

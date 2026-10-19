@@ -21,6 +21,7 @@ As for deployment, the plan is to run this in parallel with hammers v1, and incr
 - [Image Deployer](docs/image_deployer.md)
 - [Set Image Property](docs/set_image_property.md)
 - [Serial Console Enabler](docs/serial_console_enabler.md)
+- [Node Condition Detector](docs/node_condition_detector.md)
 
 # Running Hammers
 
